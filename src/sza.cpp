@@ -1,15 +1,3 @@
-/*
-
- _                      _       _   _
-| |                    (_)     | | | |
-| |      ___ __      __ _  ___ | |_| |  ___
-| |     / _ \\ \ /\ / /| |/ __||  _  | / _ \
-| |____|  __/ \ V  V / | |\__ \| | | ||  __/
-\_____/ \___|  \_/\_/  |_||___/\_| |_/ \___|
-
-Compatible with all TTGO camera products, written by LewisHe
-03/28/2020
-*/
 
 #include <WiFi.h>
 #include <Wire.h>
@@ -17,19 +5,11 @@ Compatible with all TTGO camera products, written by LewisHe
 #include "HX711.h"
 #include <time.h>
 #include <SD.h>
-/***************************************
- *  Board select
- **************************************/
-/* Select your board here, see the board list in the README for details*/
-// #define CAMERA_MODEL_TTGO_T_JOURNAL
-// #define CAMERA_MODEL_TTGO_T_CAMERA_MINI
-// #define CAMERA_MODEL_TTGO_T_CAMERA_PLUS
-// #define CAMERA_MODEL_TTGO_T_CAMERA_V05
-// #define CAMERA_MODEL_TTGO_T_CAMERA_V16
-// #define CAMERA_MODEL_TTGO_T_CAMERA_V162
-// #define CAMERA_MODEL_TTGO_T_CAMERA_V17
-// #define ESPRESSIF_ESP_EYE
- #define CAMERA_MODEL_TTGO_T_CAM_SIM
+#include "esp_sleep.h"
+
+#define CAMERA_MODEL_TTGO_T_CAM_SIM
+#include "select_pins.h"
+
 
 /***************************************
  *  Function
@@ -41,7 +21,8 @@ Compatible with all TTGO camera products, written by LewisHe
 
 // When using timed sleep, set the sleep time here
 #define uS_TO_S_FACTOR 1000000 /* Conversion factor for micro seconds to seconds */
-#define TIME_TO_SLEEP 5        /* Time ESP32 will go to sleep (in seconds) */
+#define TIME_TO_SLEEP 30        /* Time ESP32 will go to sleep (in seconds) */
+RTC_DATA_ATTR int boot_count = 0; // survives deep sleep
 
 /***************************************
  *  WiFi
@@ -51,21 +32,17 @@ Compatible with all TTGO camera products, written by LewisHe
 #define WIFI_SSID "moto g 5G plus 2457"
 #define WIFI_PASSWD "sjefenben" 
 
-#include "select_pins.h"
+
 
 /***************************************
  *  Forward declarations
  **************************************/
-bool setupSensor();
-void readSensor();
+void print_wakeup_reason();
+bool setupMagneticContactSensor();
 bool deviceProbe(uint8_t addr);
-bool setupDisplay();
-void loopDisplay();
-bool setupPower();
 bool setupSDCard();
 bool setupCamera();
 void setupNetwork();
-void setupButton();
 bool captureAndSaveImage();
 void hx711_hard_reset(int sckPin);
 bool readMagneticContact();
@@ -83,7 +60,7 @@ const int LOADCELL_SCK_PIN = 4;
 
 HX711 scale;
 
-float calibration_factor = -7050.0; // later afstellen
+float calibration_factor = -130; // initiële waarde, na inbouwen definitief calibreren
 
 // Image capture timing
 static unsigned long lastCaptureTime = 0;
@@ -91,268 +68,31 @@ static const unsigned long CAPTURE_INTERVAL = 5000; // 1 second in milliseconds
 
 extern void startCameraServer();
 
-#if defined(BUTTON_1)
-// Depend BME280 library ,See https://github.com/mathertel/OneButton
-#include <OneButton.h>
-OneButton button(BUTTON_1, true);
-#endif
-
-#if defined(ENABLE_BEM280)
-// Depend BME280 library ,See https://github.com/sparkfun/SparkFun_BME280_Arduino_Library
-#include "SparkFunBME280.h"
-BME280 sensor;
-String temp, pressure, altitude, humidity;
-#endif
-
-#if defined(SSD130_MODLE_TYPE)
-// Depend OLED library ,See  https://github.com/ThingPulse/esp8266-oled-ssd1306
-#include "SSD1306.h"
-#include "OLEDDisplayUi.h"
-#define SSD1306_ADDRESS 0x3c
-SSD1306 oled(SSD1306_ADDRESS, I2C_SDA, I2C_SCL, (OLEDDISPLAY_GEOMETRY)SSD130_MODLE_TYPE);
-OLEDDisplayUi ui(&oled);
-#endif
-
-#if defined(ENABLE_TFT)
-// Depend TFT_eSPI library ,See  https://github.com/Bodmer/TFT_eSPI
-#include <TFT_eSPI.h>
-TFT_eSPI tft = TFT_eSPI();
-#endif
-
-bool setupSensor()
-{
-#if defined(ENABLE_BEM280)
-    bool status = sensor.beginI2C();
-    if (!status)
-        return false;
-    sensor.setMode(MODE_SLEEP); // Sleep for now
-    sensor.setFilter(1);        // 0 to 4 is valid. Filter coefficient. See 3.4.4
-    sensor.setStandbyTime(0);   // 0 to 7 valid. Time between readings. See table 27.
-
-    sensor.setTempOverSample(1);     // 0 to 16 are valid. 0 disables temp sensing. See table 24.
-    sensor.setPressureOverSample(1); // 0 to 16 are valid. 0 disables pressure sensing. See table 23.
-    sensor.setHumidityOverSample(1); // 0 to 16 are valid. 0 disables humidity sensing. See table 19.
-
-    sensor.setMode(MODE_SLEEP); // MODE_SLEEP, MODE_FORCED, MODE_NORMAL is valid. See 3.3
-#endif
-
-#if defined(AS312_PIN)
-    pinMode(AS312_PIN, INPUT);
-#endif
-
-#if defined(MAGNETIC_CONTACT_PIN)
-    pinMode(MAGNETIC_CONTACT_PIN, INPUT);
-#endif
-
-    return true;
+void print_wakeup_reason() {
+    esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+    switch (cause) {
+        case ESP_SLEEP_WAKEUP_TIMER:  printf("Timer wakeup\n"); break;
+        case ESP_SLEEP_WAKEUP_EXT0:   printf("EXT0 wakeup\n"); break;
+        case ESP_SLEEP_WAKEUP_EXT1:   printf("EXT1 wakeup\n"); break;
+        case ESP_SLEEP_WAKEUP_UNDEFINED: printf("Not a wakeup reset\n"); break;
+        default: printf("Other cause: %d\n", cause); break;
+    }
 }
 
-void readSensor()
+bool setupMagneticContactSensor()
 {
-#if defined(ENABLE_BEM280)
 
-    static long lastMillis;
+    #if defined(MAGNETIC_CONTACT_PIN)
+        pinMode(MAGNETIC_CONTACT_PIN, INPUT_PULLDOWN);
+    #endif
 
-    if (millis() - lastMillis < DEFAULT_MEASUR_MILLIS)
-        return;
-    sensor.setMode(MODE_FORCED); // Wake up sensor and take reading
-
-    long startTime = millis();
-    while (sensor.isMeasuring() == false)
-        ; // Wait for sensor to start measurment
-    while (sensor.isMeasuring() == true)
-        ; // Hang out while sensor completes the reading
-    long endTime = millis();
-
-    // Sensor is now back asleep but we get get the data
-    Serial.print(" Measure time(ms): ");
-    Serial.print(endTime - startTime);
-
-    Serial.print(" Humidity: ");
-    humidity = sensor.readFloatHumidity();
-    Serial.print(humidity);
-
-    Serial.print(" Pressure: ");
-    pressure = sensor.readFloatPressure();
-    Serial.print(pressure);
-
-    Serial.print(" Alt: ");
-    // Serial.print(sensor.readFloatAltitudeMeters(), 1);
-    altitude = String(sensor.readFloatAltitudeFeet());
-    Serial.print(altitude);
-
-    Serial.print(" Temp: ");
-    // Serial.print(sensor.readTempF(), 2);
-    temp = String(sensor.readTempC());
-    Serial.print(temp);
-
-    Serial.println();
-
-#endif /*ENABLE_BEM280*/
+    return true;
 }
 
 bool deviceProbe(uint8_t addr)
 {
     Wire.beginTransmission(addr);
     return Wire.endTransmission() == 0;
-}
-
-bool setupDisplay()
-{
-
-#if defined(ENABLE_TFT)
-#if defined(CAMERA_MODEL_TTGO_T_CAMERA_PLUS)
-    tft.init();
-    tft.setRotation(0);
-    tft.fillScreen(TFT_BLACK);
-    tft.setTextSize(2);
-    tft.setTextDatum(MC_DATUM);
-    tft.drawString("TFT_eSPI", tft.width() / 2, tft.height() / 2);
-    tft.drawString("LilyGo Camera Plus", tft.width() / 2, tft.height() / 2 + 20);
-    pinMode(TFT_BL_PIN, OUTPUT);
-    digitalWrite(TFT_BL_PIN, HIGH);
-#endif
-
-#elif defined(SSD130_MODLE_TYPE)
-    static FrameCallback frames[] = {
-        [](OLEDDisplay * display, OLEDDisplayUiState * state, int16_t x, int16_t y)
-        {
-            display->setTextAlignment(TEXT_ALIGN_CENTER);
-            display->setFont(ArialMT_Plain_10);
-#if (SSD130_MODLE_TYPE)
-            display->drawString(64 + x, 0 + y, macAddress);
-            display->drawString(64 + x, 10 + y, ipAddress);
-#else
-            display->drawString(64 + x, 9 + y, macAddress);
-            display->drawString(64 + x, 25 + y, ipAddress);
-#endif
-
-#if defined(AS312_PIN)
-            if (digitalRead(AS312_PIN)) {
-                display->drawString(64 + x, 40 + y, "AS312 Trigger");
-            }
-#endif
-        },
-        [](OLEDDisplay * display, OLEDDisplayUiState * state, int16_t x, int16_t y)
-        {
-#if defined(ENABLE_BME280)
-            display->setFont(ArialMT_Plain_16);
-            display->setTextAlignment(TEXT_ALIGN_LEFT);
-            display->drawString(0 + x, 0 + y, temp);
-            display->drawString(0 + x, 16 + y, pressure);
-            display->drawString(0 + x, 32 + y, altitude);
-            display->drawString(0 + x, 48 + y, humidity);
-#else
-            display->setTextAlignment(TEXT_ALIGN_CENTER);
-            display->setFont(ArialMT_Plain_10);
-
-#if (SSD130_MODLE_TYPE)
-            // if (oled.getHeight() == 32) {
-            display->drawString(64 + x, 0 + y, "Camera Ready! Use");
-            display->drawString(64 + x, 10 + y, "http://" + ipAddress);
-            display->drawString(64 + x, 16 + y, "to connect");
-            // } else {
-#else
-            display->drawString(64 + x, 5 + y, "Camera Ready! Use");
-            display->drawString(64 + x, 25 + y, "http://" + ipAddress);
-            display->drawString(64 + x, 45 + y, "to connect");
-            // }
-#endif /*SSD130_MODLE_TYPE*/
-
-#endif /*ENABLE_BME280*/
-        }
-    };
-
-    if (!deviceProbe(SSD1306_ADDRESS))
-        return false;
-    oled.init();
-    // Wire.setClock(100000);  //! Reduce the speed and prevent the speed from being too high, causing the screen
-    oled.setFont(ArialMT_Plain_16);
-    oled.setTextAlignment(TEXT_ALIGN_CENTER);
-    // delay(50);
-    oled.drawString(oled.getWidth() / 2, oled.getHeight() / 2 - 10, "LilyGo CAM");
-    oled.display();
-    ui.setTargetFPS(30);
-    ui.setIndicatorPosition(BOTTOM);
-    ui.setIndicatorDirection(LEFT_RIGHT);
-    ui.setFrameAnimation(SLIDE_LEFT);
-    ui.setFrames(frames, sizeof(frames) / sizeof(frames[0]));
-    ui.setTimePerFrame(6000);
-    ui.disableIndicator();
-#endif
-    return true;
-}
-
-void loopDisplay()
-{
-#if defined(SSD130_MODLE_TYPE)
-    if (ui.update()) {
-#endif /*SSD130_MODLE_TYPE*/
-
-#if defined(BUTTON_1)
-        button.tick();
-#endif /*BUTTON_1*/
-
-#if defined(SSD130_MODLE_TYPE)
-    }
-#elif defined(ENABLE_TFT)
-
-        // ***
-
-#endif /*SSD130_MODLE_TYPE & ENABLE_TFT*/
-}
-
-bool setupPower()
-{
-#if defined(ENABLE_IP5306)
-#define IP5306_ADDR 0X75
-#define IP5306_REG_SYS_CTL0 0x00
-    if (!deviceProbe(IP5306_ADDR))
-        return false;
-    bool en = true;
-    Wire.beginTransmission(IP5306_ADDR);
-    Wire.write(IP5306_REG_SYS_CTL0);
-    if (en)
-        Wire.write(0x37); // Set bit1: 1 enable 0 disable boost keep on
-    else
-        Wire.write(0x35); // 0x37 is default reg value
-    return Wire.endTransmission() == 0;
-
-#elif defined(ENABLE_AXP192)
-#define AXP192_ADDRESS 0x34
-    if (!deviceProbe(AXP192_ADDRESS))
-        return false;
-    // Turn off no use power channel , Or you can do nothing
-    uint8_t val;
-    Wire.beginTransmission(AXP192_ADDRESS);
-    Wire.write(0x30);
-    Wire.endTransmission();
-    Wire.requestFrom(AXP192_ADDRESS, 1);
-    val = Wire.read();
-
-    Wire.beginTransmission(AXP192_ADDRESS);
-    Wire.write(0x30);
-    Wire.write(val & 0xFC);
-    Wire.endTransmission();
-
-    Wire.beginTransmission(AXP192_ADDRESS);
-    Wire.write(0x12);
-    Wire.endTransmission();
-    Wire.requestFrom(AXP192_ADDRESS, 1);
-    val = Wire.read();
-
-    Wire.beginTransmission(AXP192_ADDRESS);
-    Wire.write(0x12);
-    Wire.write(val & 0b10100010);
-    Wire.endTransmission();
-#endif
-#if defined(CAMERA_MODEL_TTGO_T_CAMERA_MINI)
-    //  There is a pin in the Mini to control the camera power
-    pinMode(POWER_CONTROL_PIN, OUTPUT);
-    digitalWrite(POWER_CONTROL_PIN, HIGH);
-#endif
-
-    return true;
 }
 
 #if defined(SDCARD_CS_PIN) || defined(SD_CS)
@@ -366,24 +106,6 @@ bool setupSDCard()
         If the screen is not initialized, the initialization SPI bus needs to be turned on.
     */
     SPI.begin(SD_SCLK, SD_MISO, SD_MOSI);
-
-#if defined(SDCARD_CS_PIN)
-    if (!SD.begin(SDCARD_CS_PIN)) {
-        tft.setTextColor(TFT_RED);
-        tft.drawString("SDCard begin failed", tft.width() / 2, tft.height() / 2 - 20);
-        tft.setTextColor(TFT_WHITE);
-        return false;
-    } else {
-        String cardInfo = String(((uint32_t)SD.cardSize() / 1024 / 1024));
-        tft.setTextColor(TFT_GREEN);
-        tft.drawString("SDcardSize=[" + cardInfo + "]MB", tft.width() / 2, tft.height() / 2 + 92);
-        tft.setTextColor(TFT_WHITE);
-
-        Serial.print("SDcardSize=[");
-        Serial.print(cardInfo);
-        Serial.println("]MB");
-    }
-#endif
 
 #if defined(SD_CS)
     if (!SD.begin(SD_CS)) {
@@ -441,14 +163,6 @@ bool setupCamera()
     }
 #endif
 
-#if defined(ESPRESSIF_ESP_EYE) || defined(CAMERA_MODEL_TTGO_T_CAMERA_V162) || defined(CAMERA_MODEL_TTGO_T_CAMERA_MINI)
-    /* IO13, IO14 is designed for JTAG by default,
-     * to use it as generalized input,
-     * firstly declair it as pullup input */
-    pinMode(13, INPUT_PULLUP);
-    pinMode(14, INPUT_PULLUP);
-#endif
-
     // camera init
     esp_err_t err = esp_camera_init(&config);
     if (err != ESP_OK) {
@@ -466,10 +180,6 @@ bool setupCamera()
     // drop down frame size for higher initial frame rate
     s->set_framesize(s, FRAMESIZE_QVGA);
 
-#if defined(CAMERA_MODEL_TTGO_T_CAMERA_V162)
-    s->set_vflip(s, 1);
-    s->set_hmirror(s, 1);
-#endif
     return true;
 }
 
@@ -492,12 +202,7 @@ void setupNetwork()
     ipAddress = WiFi.localIP().toString();
     macAddress += WiFi.macAddress().substring(0, 5);
 #endif
-#if defined(ENABLE_TFT)
-#if defined(CAMERA_MODEL_TTGO_T_CAMERA_PLUS)
-    tft.drawString("ipAddress:", tft.width() / 2, tft.height() / 2 + 50);
-    tft.drawString(ipAddress, tft.width() / 2, tft.height() / 2 + 72);
-#endif
-#endif
+
 }
 
 bool captureAndSaveImage()
@@ -547,73 +252,6 @@ bool captureAndSaveImage()
 #endif
 }
 
-void setupButton()
-{
-#if defined(BUTTON_1)
-    button.attachClick([]() {
-        static bool en = false;
-        sensor_t *s = esp_camera_sensor_get();
-        en = en ? 0 : 1;
-        s->set_vflip(s, en);
-#if defined(SSD130_MODLE_TYPE)
-        if (en) {
-            oled.resetOrientation();
-        } else {
-            oled.flipScreenVertically();
-        }
-#endif
-        // delay(200);
-    });
-
-    button.attachDoubleClick([]() {
-        if (PWDN_GPIO_NUM > 0) {
-            pinMode(PWDN_GPIO_NUM, PULLUP);
-            digitalWrite(PWDN_GPIO_NUM, HIGH);
-        }
-
-#if defined(SSD130_MODLE_TYPE)
-        ui.disableAutoTransition();
-        oled.setTextAlignment(TEXT_ALIGN_CENTER);
-        oled.setFont(ArialMT_Plain_10);
-        oled.clear();
-#if defined(AS312_PIN) && defined(PIR_SUPPORT_WAKEUP)
-        oled.drawString(oled.getWidth() / 2, oled.getHeight() / 2, "Set to wake up from PIR");
-#elif defined(BUTTON_1)
-        oled.drawString(oled.getWidth() / 2 - 5, oled.getHeight() / 2 - 20, "Deepsleep");
-        oled.drawString(oled.getWidth() / 2, oled.getHeight() / 2 - 10, "Set to be awakened by");
-        oled.drawString(oled.getWidth() / 2, oled.getHeight() / 2, "a key press");
-#else
-        oled.drawString(oled.getWidth() / 2, oled.getHeight() / 2, "Set to wake up by timer");
-#endif
-        oled.display();
-        delay(3000);
-        oled.clear();
-        oled.displayOff();
-#else
-        delay(2000);
-#endif /*SSD130_MODLE_TYPE*/
-
-#if defined(AS312_PIN) && defined(PIR_SUPPORT_WAKEUP)
-        esp_sleep_enable_ext1_wakeup(((uint64_t)(((uint64_t)1) << AS312_PIN)), ESP_EXT1_WAKEUP_ANY_HIGH);
-#elif defined(BUTTON_1)
-        // esp_sleep_enable_ext0_wakeup((gpio_num_t )BUTTON_1, LOW);
-#if defined(CAMERA_MODEL_TTGO_T_CAMERA_MINI)
-        esp_sleep_enable_ext1_wakeup(((uint64_t)(((uint64_t)1) << BUTTON_1)), ESP_EXT1_WAKEUP_ANY_HIGH);
-#else
-        esp_sleep_enable_ext1_wakeup(((uint64_t)(((uint64_t)1) << BUTTON_1)), ESP_EXT1_WAKEUP_ALL_LOW);
-#endif
-#else
-        esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
-#endif
-        esp_deep_sleep_start();
-    });
-#if defined(CAMERA_MODEL_TTGO_T_CAMERA_MINI)
-    button.setClickTicks(200);
-    button.setDebounceTicks(0);
-#endif
-#endif /*BUTTON_1*/
-}
-
 void hx711_hard_reset(int sckPin) {
   pinMode(sckPin, OUTPUT);
   digitalWrite(sckPin, HIGH);
@@ -622,62 +260,43 @@ void hx711_hard_reset(int sckPin) {
   delay(500);
 }
 
-bool readMagneticContact() {
-  // Read the magnetic contact sensor
-  // Returns true if contact is closed (magnet present)
-  // Returns false if contact is open (magnet absent)
-  bool contactState = digitalRead(MAGNETIC_CONTACT_PIN);
-  return contactState;
+void scale_start() {
+    scale.begin(HX711_DT, HX711_SCK);
+
+    // GEEN is_ready()
+    Serial.println("Reading raw data...");
+
+    long raw = scale.read_average(10);
+    Serial.print("Raw value: ");
+    Serial.println(raw);
+
+    scale.set_scale(calibration_factor);
+
+    Serial.println("Remove all weight");
+    // delay(2000);
+    scale.tare();
+
+    Serial.println("Tare done");
+
+    // if (scale.is_ready()) {
+    //     scale.set_scale();    
+    //     Serial.println("Tare... remove any weights from the scale.");
+    //     delay(5000);
+    //     scale.tare();
+    //     Serial.println("Tare done...");
+    //     Serial.print("Place a known weight on the scale...");
+    //     delay(5000);
+    //     long reading = scale.get_units(10);
+    //     Serial.print("Result: ");
+    //     Serial.println(reading);
+    // } 
+    // else {
+    //     Serial.println("HX711 not found.");
+    // }
+    // delay(1000);
 }
 
-
-void setup()
-{
-
-    Serial.begin(115200);
-    uint32_t start = millis();
-    // Wait for serial communication to be established, and avoid hanging when the serial monitor is not open
-    delay(5000);
-    while (!Serial && millis() - start < 5000) {
-        delay(10);
-    }
-#if defined(PWR_ON_PIN)
-    pinMode(PWR_ON_PIN, OUTPUT);
-    digitalWrite(PWR_ON_PIN, 1);
-#endif
-#if defined(I2C_SDA) && defined(I2C_SCL)
-    Wire.begin(I2C_SDA, I2C_SCL);
-#endif
-
-    bool status;
-    status = setupDisplay();
-    Serial.print("setupDisplay status ");
-    Serial.println(status);
-
-    status = setupSDCard();
-    Serial.print("setupSDCard status ");
-    Serial.println(status);
-
-    status = setupPower();
-    Serial.print("setupPower status ");
-    Serial.println(status);
-
-    status = setupSensor();
-    Serial.print("setupSensor status ");
-    Serial.println(status);
-
-    status = setupCamera();
-    Serial.print("setupCamera status ");
-    Serial.println(status);
-    if (!status) {
-        delay(10000);
-        esp_restart();
-    }
-
-    setupButton();
-
-    setupNetwork();
-
+void setupTime() {
     // Synchronize time with NTP server
     Serial.println("Syncing time with NTP...");
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
@@ -691,57 +310,123 @@ void setup()
     Serial.println();
     Serial.print("Current time: ");
     Serial.println(ctime(&now));
+}
 
-    startCameraServer();
+void readScale() {
+    long raw = scale.read();   // lage-level check
+    float weight = scale.get_units(5);
 
-    Serial.print("Camera Ready! Use 'http://");
-    Serial.print(ipAddress);
-    Serial.println("' to connect");
+    Serial.print("Raw: ");
+    Serial.print(raw);
+    Serial.print("  Weight: ");
+    Serial.print(weight, 2);
+    Serial.println(" g");
+}
 
-    hx711_hard_reset(HX711_SCK);
+bool readMagneticContact() {
+  // Read the magnetic contact sensor
+  // Returns true if contact is closed (magnet present)
+  // Returns false if contact is open (magnet absent)
+  bool contactState = digitalRead(MAGNETIC_CONTACT_PIN);
+  return contactState;
+}
 
-    scale.begin(HX711_DT, HX711_SCK);
+void startSleep() {
+    Serial.print("Go to sleep: ");
+    esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+    esp_sleep_enable_ext0_wakeup(GPIO_NUM_21, 0);
 
-    // GEEN is_ready()
-    Serial.println("Reading raw data...");
+    vTaskDelay(pdMS_TO_TICKS(1000)); // wait for serial comm to finish
 
-    long raw = scale.read_average(10);
-    Serial.print("Raw value: ");
-    Serial.println(raw);
+    esp_deep_sleep_start();
+    // esp_light_sleep_start();
 
-    scale.set_scale(calibration_factor);
+    // vTaskDelay(pdMS_TO_TICKS(1000)); // wait for serial to stabilize
 
-    Serial.println("Remove all weight");
-    delay(2000);
-    scale.tare();
+    // // Execution resumes HERE after wakeup
+    // printf("Woke up!\n");
+    // printf("Cause: %d\n", esp_sleep_get_wakeup_cause());
+    
+}
 
-    Serial.println("Tare done");
 
-    if (scale.is_ready()) {
-        scale.set_scale();    
-        Serial.println("Tare... remove any weights from the scale.");
-        delay(5000);
-        scale.tare();
-        Serial.println("Tare done...");
-        Serial.print("Place a known weight on the scale...");
-        delay(5000);
-        long reading = scale.get_units(10);
-        Serial.print("Result: ");
-        Serial.println(reading);
-    } 
-    else {
-        Serial.println("HX711 not found.");
+void setup()
+{
+
+#if defined(PWR_ON_PIN)
+    pinMode(PWR_ON_PIN, OUTPUT);
+    digitalWrite(PWR_ON_PIN, 1);
+#endif
+
+    Serial.begin(115200);
+    uint32_t start = millis();
+    // Wait for serial communication to be established, and avoid hanging when the serial monitor is not open
+    // delay(5000);
+    while (!Serial && millis() - start < 5000) {
+        delay(10);
     }
-    delay(1000);
+
+    print_wakeup_reason();
+
+#if defined(I2C_SDA) && defined(I2C_SCL)
+    Wire.begin(I2C_SDA, I2C_SCL);
+#endif
+
+    scale_start();
+
+    bool status;
+
+    status = setupMagneticContactSensor();
+    Serial.print("setupMagneticContactSensor status ");
+    Serial.println(status);
+
+    status = setupCamera();
+    Serial.print("setupCamera status ");
+    Serial.println(status);
+
+    status = setupSDCard();
+    Serial.print("setupSDCard status ");
+    Serial.println(status);
+
+    // if (!status) {
+    //     delay(10000);
+    //     esp_restart();
+    // }
+
+    setupNetwork();
+
+    setupTime();
+
+    //startCameraServer();
+
+    // Serial.print("Camera Ready! Use 'http://");
+    // Serial.print(ipAddress);
+    // Serial.println("' to connect");
+
+    //hx711_hard_reset(HX711_SCK);
+
+    //LED logic test
+    // pinMode(LED_PIN, OUTPUT);
+    // digitalWrite(LED_PIN, HIGH);
+    // delay(1000);
+    // digitalWrite(LED_PIN, LOW);
+    // delay(1000);
+    // digitalWrite(LED_PIN, HIGH);
+
+    //TODO WiFi signal strength check
+    int rssi = WiFi.RSSI();
+    Serial.print("WiFi Signal Strength: ");
+    Serial.println(rssi);
+    
 }
 
 void loop()
 {
-    // loopDisplay();
 
     // // Capture image and take scale reading every CAPTURE_INTERVAL milliseconds
     // unsigned long currentTime = millis();
     // if (currentTime - lastCaptureTime >= CAPTURE_INTERVAL) {
+
     //     long raw = scale.read();   // lage-level check
     //     float weight = scale.get_units(5);
 
@@ -760,11 +445,22 @@ void loop()
     //     //captureAndSaveImage();
     // }
 
+    //Take scale reading directly after wakeup, to check if the scale is still responsive after deep sleep
+    void readScale(); 
+
 
     // Read magnetic contact sensor
-    bool contactState = readMagneticContact();
-    Serial.print("Magnetic Contact: ");
-    Serial.println(contactState ? "CLOSED" : "OPEN");
+    // Wait for the magnetic contact to be closed, indicating the lid closed again
+    while (!readMagneticContact()) {
+        Serial.println("Waiting for magnetic contact to close...");
+        Serial.print("Magnetic Contact: ");
+        Serial.println(readMagneticContact() ? "CLOSED" : "OPEN");
 
-    //esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+        delay(2000);
+    }
+
+    // Once the contact is closed, take a new scale reading and go to sleep
+    readScale();
+
+    startSleep();
 }
