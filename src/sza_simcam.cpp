@@ -406,17 +406,33 @@ void setup()
     //hx711_hard_reset(HX711_SCK);
 
     //LED logic test
-    // pinMode(LED_PIN, OUTPUT);
-    // digitalWrite(LED_PIN, HIGH);
-    // delay(1000);
-    // digitalWrite(LED_PIN, LOW);
-    // delay(1000);
-    // digitalWrite(LED_PIN, HIGH);
+
+        for (int i = 33; i < 55; i++) {
+        pinMode(i, OUTPUT);
+        Serial.print("Try LED on pin ");
+        Serial.println(i);
+        digitalWrite(i, HIGH);
+        delay(1000);
+        digitalWrite(i, LOW);
+        delay(1000);
+        Serial.print("LED toggled on pin ");        
+        Serial.println(i);  
+    }
 
     //TODO WiFi signal strength check
     int rssi = WiFi.RSSI();
     Serial.print("WiFi Signal Strength: ");
     Serial.println(rssi);
+
+    const char *quality;
+
+    if      (rssi > -50) quality = "Excellent";
+    else if (rssi > -60) quality = "Good";
+    else if (rssi > -70) quality = "Fair";
+    else if (rssi > -80) quality = "Weak";
+    else                 quality = "Very poor";
+
+    Serial.printf("RSSI: %d dBm (%s)\n", rssi, quality);
     
 }
 

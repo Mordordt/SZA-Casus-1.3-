@@ -34,7 +34,17 @@
 #define HX711_SCK 46
 
 #define MAGNETIC_CONTACT_PIN 21  // GPIO pin connected to magnetic contact sensor
-#define LED_PIN 31 //LED for light
+#define LED_PIN 44 //LED for light
+
+
+#elif defined(CAMERA_MODEL_ESPCAM)
+
+#define HX711_DT  12
+#define HX711_SCK 13
+
+#define MAGNETIC_CONTACT_PIN 14  // GPIO pin connected to magnetic contact sensor
+#define LED_PIN 15 //LED for light
+
 
 #else
 
