@@ -13,7 +13,9 @@ RTC_DATA_ATTR int boot_count = 0; // survives deep sleep
 /***************************************
  *  Forward declarations
  **************************************/
+void begin_serial_communication();
 void print_wakeup_reason();
+void setupScale();
 bool setupMagneticContactSensor();
 void hx711_hard_reset(int sckPin);
 bool readMagneticContact();
@@ -27,6 +29,15 @@ float calibration_factor = -130; // initiële waarde, na inbouwen definitief cal
 // Image capture timing
 static unsigned long lastCaptureTime = 0;
 static const unsigned long CAPTURE_INTERVAL = 5000; // 1 second in milliseconds
+
+void begin_serial_communication() {
+    Serial.begin(115200);
+    uint32_t start = millis();
+    // Wait for serial communication to be established, and avoid hanging when the serial monitor is not open
+    while (!Serial && millis() - start < 2000) {
+        delay(10);
+    }
+}
 
 void print_wakeup_reason() {
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
@@ -57,7 +68,7 @@ void hx711_hard_reset(int sckPin) {
   delay(500);
 }
 
-void scale_start() {
+void setupScale() {
     scale.begin(HX711_DT, HX711_SCK);
 
     // GEEN is_ready()
@@ -115,7 +126,9 @@ bool readMagneticContact() {
 void startSleep() {
     Serial.print("Go to sleep: ");
     esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
-    esp_sleep_enable_ext0_wakeup(GPIO_NUM_21, 0);
+    // Option 1: Use internal pull-up
+    pinMode(WAKE_PIN, INPUT_PULLDOWN);
+    esp_sleep_enable_ext0_wakeup(WAKE_PIN, 0);
 
     vTaskDelay(pdMS_TO_TICKS(1000)); // wait for serial comm to finish
 
@@ -139,17 +152,11 @@ void setup()
     digitalWrite(PWR_ON_PIN, 1);
 #endif
 
-    Serial.begin(115200);
-    uint32_t start = millis();
-    // Wait for serial communication to be established, and avoid hanging when the serial monitor is not open
-    // delay(5000);
-    while (!Serial && millis() - start < 5000) {
-        delay(10);
-    }
+    begin_serial_communication();
 
     print_wakeup_reason();
 
-    scale_start();
+    setupScale();
 
     bool status;
 
@@ -158,21 +165,6 @@ void setup()
     Serial.println(status);
 
     //hx711_hard_reset(HX711_SCK);
-
-    //LED logic test
-    pinMode(LED_PIN, OUTPUT);
-    Serial.print("Try LED on pin ");
-    Serial.println(LED_PIN);
-
-    for (int i = 0; i < 100; i++) {
-        
-        digitalWrite(LED_PIN, HIGH);
-        delay(1000);
-        digitalWrite(LED_PIN, LOW);
-        delay(1000);
-        Serial.print("LED toggled x times: ");        
-        Serial.println(i);  
-    }
     
 }
 

@@ -32,8 +32,6 @@ RTC_DATA_ATTR int boot_count = 0; // survives deep sleep
 #define WIFI_SSID "moto g 5G plus 2457"
 #define WIFI_PASSWD "sjefenben" 
 
-
-
 /***************************************
  *  Forward declarations
  **************************************/
@@ -49,14 +47,8 @@ bool readMagneticContact();
 void setup();
 void loop();
 
-#if defined(SOFTAP_MODE)
-#endif
 String macAddress = "";
 String ipAddress = "";
-
-// HX711 circuit wiring
-const int LOADCELL_DOUT_PIN = 16;
-const int LOADCELL_SCK_PIN = 4;
 
 HX711 scale;
 
