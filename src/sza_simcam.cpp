@@ -6,9 +6,11 @@
 #include <time.h>
 #include <SD.h>
 #include "esp_sleep.h"
+#include <esp_now.h>
 
 #define CAMERA_MODEL_TTGO_T_CAM_SIM
 #include "select_pins.h"
+#include "magnetic_contact.h"
 
 
 /***************************************
@@ -23,6 +25,9 @@
 #define uS_TO_S_FACTOR 1000000 /* Conversion factor for micro seconds to seconds */
 #define TIME_TO_SLEEP 30        /* Time ESP32 will go to sleep (in seconds) */
 RTC_DATA_ATTR int boot_count = 0; // survives deep sleep
+
+volatile bool weightReceived = false;
+float receivedWeight = 0;
 
 /***************************************
  *  WiFi
@@ -41,18 +46,15 @@ bool deviceProbe(uint8_t addr);
 bool setupSDCard();
 bool setupCamera();
 void setupNetwork();
+void setupTime();
+void checkWifiSignalStrength();
 bool captureAndSaveImage();
 void hx711_hard_reset(int sckPin);
-bool readMagneticContact();
 void setup();
 void loop();
 
 String macAddress = "";
 String ipAddress = "";
-
-HX711 scale;
-
-float calibration_factor = -130; // initiële waarde, na inbouwen definitief calibreren
 
 // Image capture timing
 static unsigned long lastCaptureTime = 0;
@@ -244,50 +246,6 @@ bool captureAndSaveImage()
 #endif
 }
 
-void hx711_hard_reset(int sckPin) {
-  pinMode(sckPin, OUTPUT);
-  digitalWrite(sckPin, HIGH);
-  delayMicroseconds(100);   // >60 µs
-  digitalWrite(sckPin, LOW);
-  delay(500);
-}
-
-void scale_start() {
-    scale.begin(HX711_DT, HX711_SCK);
-
-    // GEEN is_ready()
-    Serial.println("Reading raw data...");
-
-    long raw = scale.read_average(10);
-    Serial.print("Raw value: ");
-    Serial.println(raw);
-
-    scale.set_scale(calibration_factor);
-
-    Serial.println("Remove all weight");
-    // delay(2000);
-    scale.tare();
-
-    Serial.println("Tare done");
-
-    // if (scale.is_ready()) {
-    //     scale.set_scale();    
-    //     Serial.println("Tare... remove any weights from the scale.");
-    //     delay(5000);
-    //     scale.tare();
-    //     Serial.println("Tare done...");
-    //     Serial.print("Place a known weight on the scale...");
-    //     delay(5000);
-    //     long reading = scale.get_units(10);
-    //     Serial.print("Result: ");
-    //     Serial.println(reading);
-    // } 
-    // else {
-    //     Serial.println("HX711 not found.");
-    // }
-    // delay(1000);
-}
-
 void setupTime() {
     // Synchronize time with NTP server
     Serial.println("Syncing time with NTP...");
@@ -304,23 +262,47 @@ void setupTime() {
     Serial.println(ctime(&now));
 }
 
-void readScale() {
-    long raw = scale.read();   // lage-level check
-    float weight = scale.get_units(5);
+void checkWifiSignalStrength() {
+    //TODO WiFi signal strength check
+    int rssi = WiFi.RSSI();
+    Serial.print("WiFi Signal Strength: ");
+    Serial.println(rssi);
 
-    Serial.print("Raw: ");
-    Serial.print(raw);
-    Serial.print("  Weight: ");
-    Serial.print(weight, 2);
-    Serial.println(" g");
+    const char *quality;
+
+    if      (rssi > -50) quality = "Excellent";
+    else if (rssi > -60) quality = "Good";
+    else if (rssi > -70) quality = "Fair";
+    else if (rssi > -80) quality = "Weak";
+    else                 quality = "Very poor";
+
+    Serial.printf("RSSI: %d dBm (%s)\n", rssi, quality);
 }
 
-bool readMagneticContact() {
-  // Read the magnetic contact sensor
-  // Returns true if contact is closed (magnet present)
-  // Returns false if contact is open (magnet absent)
-  bool contactState = digitalRead(MAGNETIC_CONTACT_PIN);
-  return contactState;
+void onDataReceived(const uint8_t *mac, const uint8_t *data, int len) {
+    memcpy(&receivedWeight, data, sizeof(float));
+    weightReceived = true;
+    Serial.print("Received weight: ");
+    Serial.println(receivedWeight, 2);
+}
+
+void saveWeightToCSV(float weight) {
+
+  File file = SD.open("/weights.csv", FILE_APPEND);
+  if (!file) {
+    return;
+  }
+
+  // Write header if file is empty
+  if (file.size() == 0) {
+    file.println("timestamp_ms,weight_kg");
+  }
+
+  file.print(millis());
+  file.print(",");
+  file.println(weight, 3); // 3 decimal places
+
+  file.close();
 }
 
 void startSleep() {
@@ -358,13 +340,13 @@ void setup()
         delay(10);
     }
 
+    Serial.println(WiFi.macAddress());
+
     print_wakeup_reason();
 
 #if defined(I2C_SDA) && defined(I2C_SCL)
     Wire.begin(I2C_SDA, I2C_SCL);
 #endif
-
-    scale_start();
 
     bool status;
 
@@ -380,14 +362,9 @@ void setup()
     Serial.print("setupSDCard status ");
     Serial.println(status);
 
-    // if (!status) {
-    //     delay(10000);
-    //     esp_restart();
-    // }
-
-    setupNetwork();
-
-    setupTime();
+    // setupNetwork();
+    // checkWifiSignalStrength();
+    // setupTime();
 
     //startCameraServer();
 
@@ -395,67 +372,12 @@ void setup()
     // Serial.print(ipAddress);
     // Serial.println("' to connect");
 
-    //hx711_hard_reset(HX711_SCK);
-
-    //LED logic test
-
-        for (int i = 33; i < 55; i++) {
-        pinMode(i, OUTPUT);
-        Serial.print("Try LED on pin ");
-        Serial.println(i);
-        digitalWrite(i, HIGH);
-        delay(1000);
-        digitalWrite(i, LOW);
-        delay(1000);
-        Serial.print("LED toggled on pin ");        
-        Serial.println(i);  
-    }
-
-    //TODO WiFi signal strength check
-    int rssi = WiFi.RSSI();
-    Serial.print("WiFi Signal Strength: ");
-    Serial.println(rssi);
-
-    const char *quality;
-
-    if      (rssi > -50) quality = "Excellent";
-    else if (rssi > -60) quality = "Good";
-    else if (rssi > -70) quality = "Fair";
-    else if (rssi > -80) quality = "Weak";
-    else                 quality = "Very poor";
-
-    Serial.printf("RSSI: %d dBm (%s)\n", rssi, quality);
-    
 }
 
 void loop()
 {
 
-    // // Capture image and take scale reading every CAPTURE_INTERVAL milliseconds
-    // unsigned long currentTime = millis();
-    // if (currentTime - lastCaptureTime >= CAPTURE_INTERVAL) {
-
-    //     long raw = scale.read();   // lage-level check
-    //     float weight = scale.get_units(5);
-
-    //     // Serial.print("Raw: ");
-    //     // Serial.print(raw);
-    //     // Serial.print("  Weight: ");
-    //     // Serial.print(weight, 2);
-    //     // Serial.println(" g");
-
-    //     // Read magnetic contact sensor
-    //     bool contactState = readMagneticContact();
-    //     Serial.print("Magnetic Contact: ");
-    //     Serial.println(contactState ? "CLOSED" : "OPEN");
-
-    //     lastCaptureTime = currentTime;
-    //     //captureAndSaveImage();
-    // }
-
-    //Take scale reading directly after wakeup, to check if the scale is still responsive after deep sleep
-    void readScale(); 
-
+    
 
     // Read magnetic contact sensor
     // Wait for the magnetic contact to be closed, indicating the lid closed again
@@ -467,8 +389,23 @@ void loop()
         delay(2000);
     }
 
-    // Once the contact is closed, take a new scale reading and go to sleep
-    readScale();
+    WiFi.mode(WIFI_STA);
+    esp_now_init();
+    esp_now_register_recv_cb(onDataReceived);
+
+    // Wait for weight packet
+    uint32_t start = millis();
+    while (!weightReceived) {
+        if (millis() - start > 600000) break;
+        delay(4000);
+        Serial.println("Waiting for weight data... ");
+    }
+
+    if (weightReceived) {
+        saveWeightToCSV(receivedWeight);
+    }
+
+    captureAndSaveImage();
 
     startSleep();
 }

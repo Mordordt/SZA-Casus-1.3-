@@ -1,24 +1,35 @@
 
 #include "HX711.h"
 #include "esp_sleep.h"
+#include "driver/rtc_io.h"
+#include <esp_now.h>
+#include <WiFi.h>
 
 #define CAMERA_MODEL_ESPCAM
 #include "select_pins.h"
+#include "magnetic_contact.h"
 
 // When using timed sleep, set the sleep time here
 #define uS_TO_S_FACTOR 1000000 /* Conversion factor for micro seconds to seconds */
 #define TIME_TO_SLEEP 30        /* Time ESP32 will go to sleep (in seconds) */
 RTC_DATA_ATTR int boot_count = 0; // survives deep sleep
 
+// MAC address of the Camera ESP
+uint8_t cameraMAC[] = {0x34, 0x85, 0x18, 0x8D, 0x5C, 0x60};
+volatile bool sendConfirmed = false;
+
 /***************************************
  *  Forward declarations
  **************************************/
 void begin_serial_communication();
-void print_wakeup_reason();
+void wakeUpLogic();
 void setupScale();
 bool setupMagneticContactSensor();
+void setupCommunicationWithCameraESP();
 void hx711_hard_reset(int sckPin);
-bool readMagneticContact();
+float readScale();
+void onSent(const uint8_t *mac, esp_now_send_status_t status);
+void sendWeightToCameraESP(float weight);
 void setup();
 void loop();
 
@@ -34,12 +45,12 @@ void begin_serial_communication() {
     Serial.begin(115200);
     uint32_t start = millis();
     // Wait for serial communication to be established, and avoid hanging when the serial monitor is not open
-    while (!Serial && millis() - start < 2000) {
+    while (!Serial && millis() - start < 200) {
         delay(10);
     }
 }
 
-void print_wakeup_reason() {
+void wakeUpLogic() {
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     switch (cause) {
         case ESP_SLEEP_WAKEUP_TIMER:  printf("Timer wakeup\n"); break;
@@ -104,7 +115,19 @@ void setupScale() {
     // delay(1000);
 }
 
-void readScale() {
+void setupCommunicationWithCameraESP() {
+    WiFi.mode(WIFI_STA);
+    esp_now_init();
+    esp_now_register_send_cb(onSent);
+
+    esp_now_peer_info_t peer = {};
+    memcpy(peer.peer_addr, cameraMAC, 6);
+    peer.channel = 0;
+    peer.encrypt = false;
+    esp_now_add_peer(&peer);
+}
+
+float readScale() {
     long raw = scale.read();   // lage-level check
     float weight = scale.get_units(5);
 
@@ -113,21 +136,47 @@ void readScale() {
     Serial.print("  Weight: ");
     Serial.print(weight, 2);
     Serial.println(" g");
+    return weight;
 }
 
-bool readMagneticContact() {
-  // Read the magnetic contact sensor
-  // Returns true if contact is closed (magnet present)
-  // Returns false if contact is open (magnet absent)
-  bool contactState = digitalRead(MAGNETIC_CONTACT_PIN);
-  return contactState;
+void onSent(const uint8_t *mac, esp_now_send_status_t status) {
+    sendConfirmed = true;
+}
+
+void sendWeightToCameraESP(float weight) {
+    // Send the weight reading to the camera ESP
+    Serial.print("Sending weight to camera ESP: ");
+    Serial.println(weight, 2);
+    
+    sendConfirmed = false;
+    esp_now_send(cameraMAC, (uint8_t*)&weight, sizeof(float));
+
+    // Wait for send confirmation before sleeping
+    uint32_t start = millis();
+    while (!sendConfirmed) {
+        if (millis() - start > 2000) break;
+        delay(10);
+    }
 }
 
 void startSleep() {
     Serial.print("Go to sleep: ");
+    // Flash the LED to indicate sleep start
+    // Disable hold on GPIO 4 to allow it to be used normally after wakeup
+    rtc_gpio_hold_dis(GPIO_NUM_4);
+    pinMode(4, OUTPUT);
+    for (int i = 0; i < 3; i++) {
+        digitalWrite(4, HIGH);
+        delay(100);
+        digitalWrite(4, LOW);
+        delay(100);
+    }
+    // Before deep sleep:
+    rtc_gpio_hold_en(GPIO_NUM_4);  // holds pin 4 LOW during deep sleep
+
     esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
     // Option 1: Use internal pull-up
-    pinMode(WAKE_PIN, INPUT_PULLDOWN);
+    pinMode(MAGNETIC_CONTACT_PIN, INPUT_PULLDOWN);
     esp_sleep_enable_ext0_wakeup(WAKE_PIN, 0);
 
     vTaskDelay(pdMS_TO_TICKS(1000)); // wait for serial comm to finish
@@ -154,7 +203,7 @@ void setup()
 
     begin_serial_communication();
 
-    print_wakeup_reason();
+    wakeUpLogic();
 
     setupScale();
 
@@ -163,6 +212,8 @@ void setup()
     status = setupMagneticContactSensor();
     Serial.print("setupMagneticContactSensor status ");
     Serial.println(status);
+
+    setupCommunicationWithCameraESP();
 
     //hx711_hard_reset(HX711_SCK);
     
@@ -194,7 +245,7 @@ void loop()
     // }
 
     //Take scale reading directly after wakeup, to check if the scale is still responsive after deep sleep
-    readScale();
+    float initialWeight = readScale();
 
     // Read magnetic contact sensor
     // Wait for the magnetic contact to be closed, indicating the lid closed again
@@ -206,8 +257,11 @@ void loop()
         delay(2000);
     }
 
-    // Once the contact is closed, take a new scale reading and go to sleep
-    readScale();
+    // Once the contact is closed, take a new scale reading
+    float finalWeight = readScale();
+
+    // Send the reading to the camera ESP 
+    sendWeightToCameraESP(finalWeight);
 
     startSleep();
 }
