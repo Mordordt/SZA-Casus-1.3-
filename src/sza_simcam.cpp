@@ -40,15 +40,18 @@ float receivedWeight = 0;
 /***************************************
  *  Forward declarations
  **************************************/
-void print_wakeup_reason();
+void performWakeUpLogic();
 bool setupMagneticContactSensor();
-bool deviceProbe(uint8_t addr);
 bool setupSDCard();
+bool setupCommunicationWithCameraESP();
 bool setupCamera();
 void setupNetwork();
-void setupTime();
+String getTime();
 void checkWifiSignalStrength();
-bool captureAndSaveImage();
+void processWeight(float weight, const String& timestamp);
+float getLastWeight();
+void updateLastWeight(float weight, const String& timestamp);
+bool captureAndSaveImage(const String& timestamp);
 void hx711_hard_reset(int sckPin);
 void setup();
 void loop();
@@ -62,7 +65,7 @@ static const unsigned long CAPTURE_INTERVAL = 5000; // 1 second in milliseconds
 
 extern void startCameraServer();
 
-void print_wakeup_reason() {
+void performWakeUpLogic() {
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     switch (cause) {
         case ESP_SLEEP_WAKEUP_TIMER:  printf("Timer wakeup\n"); break;
@@ -83,22 +86,9 @@ bool setupMagneticContactSensor()
     return true;
 }
 
-bool deviceProbe(uint8_t addr)
-{
-    Wire.beginTransmission(addr);
-    return Wire.endTransmission() == 0;
-}
-
-#if defined(SDCARD_CS_PIN) || defined(SD_CS)
-#include <SD.h>
-#endif
 bool setupSDCard()
 {
-    /*
-        T-CameraPlus Board, SD shares the bus with the LCD screen.
-        It does not need to be re-initialized after the screen is initialized.
-        If the screen is not initialized, the initialization SPI bus needs to be turned on.
-    */
+
     SPI.begin(SD_SCLK, SD_MISO, SD_MOSI);
 
 #if defined(SD_CS)
@@ -117,11 +107,21 @@ bool setupSDCard()
     return true;
 }
 
+bool setupCommunicationWithCameraESP() {
+    WiFi.mode(WIFI_STA);
+    esp_now_init();
+    esp_now_register_recv_cb(onDataReceived);
+
+    // Print MAC address for debugging
+    Serial.println(WiFi.macAddress());
+
+    return true;
+}
+
 bool setupCamera()
 {
     camera_config_t config;
 
-#if defined(Y2_GPIO_NUM)
     config.ledc_channel = LEDC_CHANNEL_0;
     config.ledc_timer = LEDC_TIMER_0;
     config.pin_d0 = Y2_GPIO_NUM;
@@ -155,7 +155,6 @@ bool setupCamera()
         config.fb_count = 1;
         config.fb_location = CAMERA_FB_IN_DRAM;
     }
-#endif
 
     // camera init
     esp_err_t err = esp_camera_init(&config);
@@ -179,6 +178,9 @@ bool setupCamera()
 
 void setupNetwork()
 {
+    // Deinitialize ESP-NOW to free up WiFi resources
+    esp_now_deinit();
+
     macAddress = "LilyGo-CAM-";
 #ifdef SOFTAP_MODE
     WiFi.mode(WIFI_AP);
@@ -199,24 +201,19 @@ void setupNetwork()
 
 }
 
-bool captureAndSaveImage()
+bool captureAndSaveImage(const String& timestamp)
 {
-#if defined(SD_CS)
-    // Get current time
-    time_t now = time(nullptr);
-    struct tm* timeinfo = localtime(&now);
-    
-    // Format filename with timestamp
+    // Format filename with provided timestamp
     char filename[64];
-    strftime(filename, sizeof(filename), "/capture_%Y_%m_%d_%H_%M_%S.jpg", timeinfo);
-    
+    snprintf(filename, sizeof(filename), "/capture_%s.jpg", timestamp.c_str());
+
     // Capture frame from camera
     camera_fb_t* fb = esp_camera_fb_get();
     if (!fb) {
         Serial.println("Camera capture failed");
         return false;
     }
-    
+
     // Open file for writing
     File file = SD.open(filename, FILE_WRITE);
     if (!file) {
@@ -225,7 +222,7 @@ bool captureAndSaveImage()
         esp_camera_fb_return(fb);
         return false;
     }
-    
+
     // Write image data to file
     if (file.write(fb->buf, fb->len) != fb->len) {
         Serial.println("Failed to write image to SD card");
@@ -233,20 +230,17 @@ bool captureAndSaveImage()
         esp_camera_fb_return(fb);
         return false;
     }
-    
+
     file.close();
     esp_camera_fb_return(fb);
-    
+
     Serial.print("Image saved: ");
     Serial.println(filename);
+
     return true;
-#else
-    Serial.println("SD Card not configured");
-    return false;
-#endif
 }
 
-void setupTime() {
+String getTime() {
     // Synchronize time with NTP server
     Serial.println("Syncing time with NTP...");
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
@@ -260,6 +254,13 @@ void setupTime() {
     Serial.println();
     Serial.print("Current time: ");
     Serial.println(ctime(&now));
+
+    // Return formatted string
+    char timestamp[20];
+    strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M%S", localtime(&now));
+    Serial.println(timestamp);
+
+    return String(timestamp);
 }
 
 void checkWifiSignalStrength() {
@@ -286,40 +287,84 @@ void onDataReceived(const uint8_t *mac, const uint8_t *data, int len) {
     Serial.println(receivedWeight, 2);
 }
 
-void saveWeightToCSV(float weight) {
+void processWeight(float weight, const String& timestamp) {
 
-  File file = SD.open("/weights.csv", FILE_APPEND);
-  if (!file) {
-    return;
-  }
+    float lastWeight = getLastWeight();
 
-  // Write header if file is empty
-  if (file.size() == 0) {
-    file.println("timestamp_ms,weight_kg");
-  }
+    if (lastWeight >= 0 && weight < lastWeight) {
+        Serial.println("Container change detected at " + timestamp);
+        registerContainerChange(lastWeight, weight, timestamp);
+    }
 
-  file.print(millis());
-  file.print(",");
-  file.println(weight, 3); // 3 decimal places
+    updateLastWeight(weight, timestamp);
+}
 
-  file.close();
+float getLastWeight() {
+    File file = SD.open("/last_weight.txt", FILE_READ);
+    if (!file) {
+        return -1.0f;
+    }
+
+    float weight = file.readStringUntil('\n').toFloat();
+    file.close();
+    return weight;
+}
+
+void updateLastWeight(float weight, const String& timestamp) {
+    // Save to CSV for historical data
+    File file = SD.open("/weights.csv", FILE_APPEND);
+    if (!file) {
+        return;
+    }
+
+    // Write header if file is empty
+    if (file.size() == 0) {
+        file.println("timestamp,weight_g");
+    }
+
+    file.print(timestamp);
+    file.print(",");
+    file.println(weight, 3);
+
+    file.close();
+
+    // Save to txt file for quick access to the latest weight
+    File file = SD.open("/last_weight.txt", FILE_WRITE);
+    if (!file) {
+        return;
+    }
+
+    file.println(weight, 3);
+    file.close();
+}
+
+void registerContainerChange(float lastWeight, float weight, const String& timestamp) {
+    // Register the container change in a separate CSV file for easier analysis of changes over time
+    File file = SD.open("/container_changes.csv", FILE_APPEND);
+    if (!file) {
+        return;
+    }
+
+    if (file.size() == 0) {
+        file.println("timestamp,weight_before_g,weight_after_g,difference_g");
+    }
+
+    file.print(timestamp);       file.print(",");
+    file.print(lastWeight, 3);   file.print(",");
+    file.print(weight, 3);       file.print(",");
+    file.println(lastWeight - weight, 3);
+
+    file.close();
 }
 
 void startSleep() {
     Serial.print("Go to sleep: ");
-    esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+    // esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
     esp_sleep_enable_ext0_wakeup(GPIO_NUM_21, 0);
 
     vTaskDelay(pdMS_TO_TICKS(1000)); // wait for serial comm to finish
 
     esp_deep_sleep_start();
-    // esp_light_sleep_start();
-
-    // vTaskDelay(pdMS_TO_TICKS(1000)); // wait for serial to stabilize
-
-    // // Execution resumes HERE after wakeup
-    // printf("Woke up!\n");
-    // printf("Cause: %d\n", esp_sleep_get_wakeup_cause());
     
 }
 
@@ -333,16 +378,14 @@ void setup()
 #endif
 
     Serial.begin(115200);
-    uint32_t start = millis();
-    // Wait for serial communication to be established, and avoid hanging when the serial monitor is not open
-    // delay(5000);
-    while (!Serial && millis() - start < 5000) {
-        delay(10);
-    }
+    // uint32_t start = millis();
+    // // Wait for serial communication to be established, and avoid hanging when the serial monitor is not open
+    // // delay(5000);
+    // while (!Serial && millis() - start < 2000) {
+    //     delay(10);
+    // }
 
-    Serial.println(WiFi.macAddress());
-
-    print_wakeup_reason();
+    performWakeUpLogic();
 
 #if defined(I2C_SDA) && defined(I2C_SCL)
     Wire.begin(I2C_SDA, I2C_SCL);
@@ -354,30 +397,22 @@ void setup()
     Serial.print("setupMagneticContactSensor status ");
     Serial.println(status);
 
-    status = setupCamera();
-    Serial.print("setupCamera status ");
-    Serial.println(status);
-
     status = setupSDCard();
     Serial.print("setupSDCard status ");
     Serial.println(status);
 
-    // setupNetwork();
-    // checkWifiSignalStrength();
-    // setupTime();
+    status = setupCommunicationWithCameraESP();
+    Serial.print("setupCommunicationWithCameraESP status ");
+    Serial.println(status);
 
-    //startCameraServer();
-
-    // Serial.print("Camera Ready! Use 'http://");
-    // Serial.print(ipAddress);
-    // Serial.println("' to connect");
+    status = setupCamera();
+    Serial.print("setupCamera status ");
+    Serial.println(status);
 
 }
 
 void loop()
 {
-
-    
 
     // Read magnetic contact sensor
     // Wait for the magnetic contact to be closed, indicating the lid closed again
@@ -389,9 +424,7 @@ void loop()
         delay(2000);
     }
 
-    WiFi.mode(WIFI_STA);
-    esp_now_init();
-    esp_now_register_recv_cb(onDataReceived);
+
 
     // Wait for weight packet
     uint32_t start = millis();
@@ -401,11 +434,16 @@ void loop()
         Serial.println("Waiting for weight data... ");
     }
 
+    //Change to WiFi for fetching current time only after receiving the weight, to save time in setup
+    setupNetwork();
+    checkWifiSignalStrength();
+    String timestamp = getTime();
+
     if (weightReceived) {
-        saveWeightToCSV(receivedWeight);
+        processWeight(receivedWeight, timestamp);
     }
 
-    captureAndSaveImage();
+    captureAndSaveImage(timestamp);
 
     startSleep();
 }
