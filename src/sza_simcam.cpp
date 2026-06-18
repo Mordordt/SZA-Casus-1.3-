@@ -43,7 +43,7 @@ float receivedWeight = 0;
 void performWakeUpLogic();
 bool setupMagneticContactSensor();
 bool setupSDCard();
-bool setupCommunicationWithCameraESP();
+bool setupCommunicationWithWeightEsp();
 bool setupCamera();
 void setupNetwork();
 String getTime();
@@ -107,7 +107,14 @@ bool setupSDCard()
     return true;
 }
 
-bool setupCommunicationWithCameraESP() {
+void onDataReceived(const uint8_t *mac, const uint8_t *data, int len) {
+    memcpy(&receivedWeight, data, sizeof(float));
+    weightReceived = true;
+    Serial.print("Received weight: ");
+    Serial.println(receivedWeight, 2);
+}
+
+bool setupCommunicationWithWeightEsp() {
     WiFi.mode(WIFI_STA);
     esp_now_init();
     esp_now_register_recv_cb(onDataReceived);
@@ -145,16 +152,19 @@ bool setupCamera()
     config.fb_location = CAMERA_FB_IN_PSRAM;
     config.grab_mode = CAMERA_GRAB_LATEST;
     // init with high specs to pre-allocate larger buffers
-    if (psramFound()) {
-        config.frame_size = FRAMESIZE_UXGA;
-        config.jpeg_quality = 8;
-        config.fb_count = 2;
-    } else {
-        config.frame_size = FRAMESIZE_SVGA;
-        config.jpeg_quality = 12;
-        config.fb_count = 1;
-        config.fb_location = CAMERA_FB_IN_DRAM;
-    }
+    config.frame_size = FRAMESIZE_UXGA;
+    config.jpeg_quality = 8;
+    config.fb_count = 2;
+    // if (psramFound()) {
+    //     config.frame_size = FRAMESIZE_UXGA;
+    //     config.jpeg_quality = 8;
+    //     config.fb_count = 2;
+    // } else {
+    //     config.frame_size = FRAMESIZE_SVGA;
+    //     config.jpeg_quality = 12;
+    //     config.fb_count = 1;
+    //     config.fb_location = CAMERA_FB_IN_DRAM;
+    // }
 
     // camera init
     esp_err_t err = esp_camera_init(&config);
@@ -280,11 +290,23 @@ void checkWifiSignalStrength() {
     Serial.printf("RSSI: %d dBm (%s)\n", rssi, quality);
 }
 
-void onDataReceived(const uint8_t *mac, const uint8_t *data, int len) {
-    memcpy(&receivedWeight, data, sizeof(float));
-    weightReceived = true;
-    Serial.print("Received weight: ");
-    Serial.println(receivedWeight, 2);
+void registerContainerChange(float lastWeight, float weight, const String& timestamp) {
+    // Register the container change in a separate CSV file for easier analysis of changes over time
+    File file = SD.open("/container_changes.csv", FILE_APPEND);
+    if (!file) {
+        return;
+    }
+
+    if (file.size() == 0) {
+        file.println("timestamp,weight_before_g,weight_after_g,difference_g");
+    }
+
+    file.print(timestamp);       file.print(",");
+    file.print(lastWeight, 3);   file.print(",");
+    file.print(weight, 3);       file.print(",");
+    file.println(lastWeight - weight, 3);
+
+    file.close();
 }
 
 void processWeight(float weight, const String& timestamp) {
@@ -329,32 +351,13 @@ void updateLastWeight(float weight, const String& timestamp) {
     file.close();
 
     // Save to txt file for quick access to the latest weight
-    File file = SD.open("/last_weight.txt", FILE_WRITE);
-    if (!file) {
+    File txtFile = SD.open("/last_weight.txt", FILE_WRITE);
+    if (!txtFile) {
         return;
     }
 
-    file.println(weight, 3);
-    file.close();
-}
-
-void registerContainerChange(float lastWeight, float weight, const String& timestamp) {
-    // Register the container change in a separate CSV file for easier analysis of changes over time
-    File file = SD.open("/container_changes.csv", FILE_APPEND);
-    if (!file) {
-        return;
-    }
-
-    if (file.size() == 0) {
-        file.println("timestamp,weight_before_g,weight_after_g,difference_g");
-    }
-
-    file.print(timestamp);       file.print(",");
-    file.print(lastWeight, 3);   file.print(",");
-    file.print(weight, 3);       file.print(",");
-    file.println(lastWeight - weight, 3);
-
-    file.close();
+    txtFile.println(weight, 3);
+    txtFile.close();
 }
 
 void startSleep() {
@@ -401,8 +404,8 @@ void setup()
     Serial.print("setupSDCard status ");
     Serial.println(status);
 
-    status = setupCommunicationWithCameraESP();
-    Serial.print("setupCommunicationWithCameraESP status ");
+    status = setupCommunicationWithWeightEsp();
+    Serial.print("setupCommunicationWithWeightEsp status ");
     Serial.println(status);
 
     status = setupCamera();
@@ -424,12 +427,10 @@ void loop()
         delay(2000);
     }
 
-
-
     // Wait for weight packet
     uint32_t start = millis();
     while (!weightReceived) {
-        if (millis() - start > 600000) break;
+        if (millis() - start > 20000) break;
         delay(4000);
         Serial.println("Waiting for weight data... ");
     }

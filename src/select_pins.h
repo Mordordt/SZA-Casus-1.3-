@@ -45,7 +45,9 @@
 #define HX711_SCK 13
 
 #define MAGNETIC_CONTACT_PIN 14  // GPIO pin connected to magnetic contact sensor
-// #define LED_PIN 15 //LED for light
+#define LED_PIN 15 //LED for light
+
+#define TARE_PIN 2 // ground to tare the scale
 
 #define WAKE_PIN GPIO_NUM_14
 

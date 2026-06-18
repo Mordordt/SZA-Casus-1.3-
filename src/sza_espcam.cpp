@@ -21,12 +21,14 @@ volatile bool sendConfirmed = false;
 /***************************************
  *  Forward declarations
  **************************************/
-void begin_serial_communication();
+void beginSerialCommunication();
 void wakeUpLogic();
 void setupScale();
-bool setupMagneticContactSensor();
+void setupMagneticContactSensor();
 void setupCommunicationWithCameraESP();
-void hx711_hard_reset(int sckPin);
+void resetHX711(int sckPin);
+void enableContainerLight();
+void disableContainerLight();
 float readScale();
 void onSent(const uint8_t *mac, esp_now_send_status_t status);
 void sendWeightToCameraESP(float weight);
@@ -35,13 +37,13 @@ void loop();
 
 HX711 scale;
 
-float calibration_factor = -130; // initiële waarde, na inbouwen definitief calibreren
+float calibration_factor = -25000;//-130; // initiële waarde, na inbouwen definitief calibreren
 
 // Image capture timing
 static unsigned long lastCaptureTime = 0;
 static const unsigned long CAPTURE_INTERVAL = 5000; // 1 second in milliseconds
 
-void begin_serial_communication() {
+void beginSerialCommunication() {
     Serial.begin(115200);
     uint32_t start = millis();
     // Wait for serial communication to be established, and avoid hanging when the serial monitor is not open
@@ -61,17 +63,36 @@ void wakeUpLogic() {
     }
 }
 
-bool setupMagneticContactSensor()
+void blinkLed(int times, int delayTime) {
+
+    // Disable hold on GPIO 4 to allow it to be used normally after wakeup
+    rtc_gpio_hold_dis(GPIO_NUM_4);
+    pinMode(4, OUTPUT);
+
+    // Flash the LED the specified number of times for the specified duration
+    for (int i = 0; i < times; i++) {
+        
+        digitalWrite(4, HIGH);
+        delay(delayTime);
+        digitalWrite(4, LOW);
+        delay(delayTime);
+
+    }
+
+    // Re-enable hold on GPIO 4 to keep the LED off during deep sleep
+    rtc_gpio_hold_en(GPIO_NUM_4);
+}
+
+void setupMagneticContactSensor()
 {
 
     #if defined(MAGNETIC_CONTACT_PIN)
         pinMode(MAGNETIC_CONTACT_PIN, INPUT_PULLDOWN);
     #endif
 
-    return true;
 }
 
-void hx711_hard_reset(int sckPin) {
+void resetHX711(int sckPin) {
   pinMode(sckPin, OUTPUT);
   digitalWrite(sckPin, HIGH);
   delayMicroseconds(100);   // >60 µs
@@ -80,6 +101,8 @@ void hx711_hard_reset(int sckPin) {
 }
 
 void setupScale() {
+    // resetHX711(HX711_SCK);
+
     scale.begin(HX711_DT, HX711_SCK);
 
     // GEEN is_ready()
@@ -91,28 +114,27 @@ void setupScale() {
 
     scale.set_scale(calibration_factor);
 
-    Serial.println("Remove all weight");
-    // delay(2000);
-    scale.tare();
+    //If tare pin is grounded, perform tare and calibration
+    pinMode(TARE_PIN, INPUT_PULLUP);
 
-    Serial.println("Tare done");
-
-    // if (scale.is_ready()) {
-    //     scale.set_scale();    
-    //     Serial.println("Tare... remove any weights from the scale.");
-    //     delay(5000);
-    //     scale.tare();
-    //     Serial.println("Tare done...");
-    //     Serial.print("Place a known weight on the scale...");
-    //     delay(5000);
-    //     long reading = scale.get_units(10);
-    //     Serial.print("Result: ");
-    //     Serial.println(reading);
-    // } 
-    // else {
-    //     Serial.println("HX711 not found.");
-    // }
-    // delay(1000);
+    if (digitalRead(TARE_PIN) == 0) {
+        blinkLed(3, 1000); // Blink the LED 3 times with 200ms delay to indicate tare and calibration
+        long reading = scale.get_units(10);
+        Serial.print("Reading before tare: ");
+        Serial.println(reading);
+        scale.set_scale();    
+        Serial.println("Tare... remove any weights from the scale.");
+        delay(5000);
+        scale.tare();
+        Serial.println("Tare done...");
+        Serial.print("Place a known weight on the scale...");
+        delay(5000);
+        reading = scale.get_units(10);
+        Serial.print("Reading after tare: ");
+        Serial.println(reading);
+        delay(1000);
+    } 
+    
 }
 
 void setupCommunicationWithCameraESP() {
@@ -127,9 +149,29 @@ void setupCommunicationWithCameraESP() {
     esp_now_add_peer(&peer);
 }
 
+void enableContainerLight() {
+
+    // Disable hold on GPIO 2 to allow it to be used normally after wakeup
+    rtc_gpio_hold_dis(GPIO_NUM_2);
+    pinMode(LED_PIN, OUTPUT);
+
+    digitalWrite(LED_PIN, HIGH);
+}
+
+void disableContainerLight() {
+
+    // Wait for 5 seconds to make sure the camera ESP has made a picture
+    delay(5000);
+
+    digitalWrite(LED_PIN, LOW);
+
+    // Re-enable hold on GPIO 2 to keep the light off during deep sleep
+    rtc_gpio_hold_en(GPIO_NUM_2);
+}
+
 float readScale() {
     long raw = scale.read();   // lage-level check
-    float weight = scale.get_units(5);
+    float weight = scale.get_units(10);
 
     Serial.print("Raw: ");
     Serial.print(raw);
@@ -141,6 +183,7 @@ float readScale() {
 
 void onSent(const uint8_t *mac, esp_now_send_status_t status) {
     sendConfirmed = true;
+    blinkLed(1, 100); // Blink the LED once for 100ms to indicate send confirmation
 }
 
 void sendWeightToCameraESP(float weight) {
@@ -154,41 +197,22 @@ void sendWeightToCameraESP(float weight) {
     // Wait for send confirmation before sleeping
     uint32_t start = millis();
     while (!sendConfirmed) {
-        if (millis() - start > 2000) break;
+        if (millis() - start > 4000) break;
         delay(10);
     }
 }
 
 void startSleep() {
-    Serial.print("Go to sleep: ");
-    // Flash the LED to indicate sleep start
-    // Disable hold on GPIO 4 to allow it to be used normally after wakeup
-    rtc_gpio_hold_dis(GPIO_NUM_4);
-    pinMode(4, OUTPUT);
-    for (int i = 0; i < 3; i++) {
-        digitalWrite(4, HIGH);
-        delay(100);
-        digitalWrite(4, LOW);
-        delay(100);
-    }
-    // Before deep sleep:
-    rtc_gpio_hold_en(GPIO_NUM_4);  // holds pin 4 LOW during deep sleep
+    Serial.print("Go to sleep ");
+    blinkLed(2, 500); // Blink the LED 2 times with 500ms delay
 
-    esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
-    // Option 1: Use internal pull-up
+    //esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
     pinMode(MAGNETIC_CONTACT_PIN, INPUT_PULLDOWN);
     esp_sleep_enable_ext0_wakeup(WAKE_PIN, 0);
 
     vTaskDelay(pdMS_TO_TICKS(1000)); // wait for serial comm to finish
 
     esp_deep_sleep_start();
-    // esp_light_sleep_start();
-
-    // vTaskDelay(pdMS_TO_TICKS(1000)); // wait for serial to stabilize
-
-    // // Execution resumes HERE after wakeup
-    // printf("Woke up!\n");
-    // printf("Cause: %d\n", esp_sleep_get_wakeup_cause());
     
 }
 
@@ -201,48 +225,53 @@ void setup()
     digitalWrite(PWR_ON_PIN, 1);
 #endif
 
-    begin_serial_communication();
+    beginSerialCommunication();
 
     wakeUpLogic();
 
     setupScale();
 
-    bool status;
-
-    status = setupMagneticContactSensor();
-    Serial.print("setupMagneticContactSensor status ");
-    Serial.println(status);
+    setupMagneticContactSensor();
 
     setupCommunicationWithCameraESP();
-
-    //hx711_hard_reset(HX711_SCK);
     
+}
+
+void testScale() {
+    for (int i = 0; i < 100; i++) {
+        scale.power_down();
+        delay(100);
+        // scale.power_up();
+        // delay(400); // settling time
+        scale.begin(HX711_DT, HX711_SCK);
+        scale.set_scale(calibration_factor);
+        delay(400);
+
+        while (!scale.is_ready()) {
+            Serial.println("HX711 not ready");
+            delay(3000);
+        }
+
+        // Discard first few readings (settling)
+        scale.get_units(3);
+        
+        //long raw = scale.read();
+        //long avg = scale.read_average(10);
+        float weight = scale.get_units(5);
+
+        // Serial.print("Raw: ");
+        // Serial.print(raw);
+        // Serial.print("  Avg: ");
+        // Serial.print(avg);
+        Serial.print("  Weight: ");
+        Serial.print(weight, 2);
+        Serial.println(" g");
+        delay(3000);
+    }
 }
 
 void loop()
 {
-
-    // // Capture image and take scale reading every CAPTURE_INTERVAL milliseconds
-    // unsigned long currentTime = millis();
-    // if (currentTime - lastCaptureTime >= CAPTURE_INTERVAL) {
-
-    //     long raw = scale.read();   // lage-level check
-    //     float weight = scale.get_units(5);
-
-    //     // Serial.print("Raw: ");
-    //     // Serial.print(raw);
-    //     // Serial.print("  Weight: ");
-    //     // Serial.print(weight, 2);
-    //     // Serial.println(" g");
-
-    //     // Read magnetic contact sensor
-    //     bool contactState = readMagneticContact();
-    //     Serial.print("Magnetic Contact: ");
-    //     Serial.println(contactState ? "CLOSED" : "OPEN");
-
-    //     lastCaptureTime = currentTime;
-    //     //captureAndSaveImage();
-    // }
 
     //Take scale reading directly after wakeup, to check if the scale is still responsive after deep sleep
     float initialWeight = readScale();
@@ -257,11 +286,18 @@ void loop()
         delay(2000);
     }
 
+    // Once the lid is closed, switch the light in the container ON 
+    
+
     // Once the contact is closed, take a new scale reading
     float finalWeight = readScale();
 
     // Send the reading to the camera ESP 
     sendWeightToCameraESP(finalWeight);
+
+    disableContainerLight();
+
+    testScale();
 
     startSleep();
 }
