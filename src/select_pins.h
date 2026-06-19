@@ -41,15 +41,18 @@
 
 #elif defined(CAMERA_MODEL_ESPCAM)
 
-#define HX711_DT  12
-#define HX711_SCK 13
+// #define HX711_DT  12
+// #define HX711_SCK 13
+#define HX711_DT  22
+#define HX711_SCK 23
 
 #define MAGNETIC_CONTACT_PIN 14  // GPIO pin connected to magnetic contact sensor
+#define WAKE_PIN GPIO_NUM_14
 #define LED_PIN 15 //LED for light
 
 #define TARE_PIN 2 // ground to tare the scale
 
-#define WAKE_PIN GPIO_NUM_14
+
 
 #else
 

@@ -37,7 +37,7 @@ void loop();
 
 HX711 scale;
 
-float calibration_factor = -25000;//-130; // initiële waarde, na inbouwen definitief calibreren
+float calibration_factor = -25;//-130; // initiële waarde, na inbouwen definitief calibreren
 
 // Image capture timing
 static unsigned long lastCaptureTime = 0;
@@ -100,17 +100,34 @@ void resetHX711(int sckPin) {
   delay(500);
 }
 
+void testScale() {
+    for (int i = 0; i < 10; i++) {
+
+        while (!scale.is_ready()) {
+            Serial.println("HX711 not ready");
+            delay(1000);
+        }
+
+        // Discard first few readings (settling)
+        scale.read_average(10);
+        
+        // Take raw reading and weight reading
+        long avg = scale.read_average(20);
+        float weight = scale.get_units(20);
+
+        Serial.print("  Avg: ");
+        Serial.print(avg);
+        Serial.print("  Weight: ");
+        Serial.print(weight, 2);
+        Serial.println(" g");
+        delay(1000);
+    }
+}
+
 void setupScale() {
     // resetHX711(HX711_SCK);
 
     scale.begin(HX711_DT, HX711_SCK);
-
-    // GEEN is_ready()
-    Serial.println("Reading raw data...");
-
-    long raw = scale.read_average(10);
-    Serial.print("Raw value: ");
-    Serial.println(raw);
 
     scale.set_scale(calibration_factor);
 
@@ -119,6 +136,10 @@ void setupScale() {
 
     if (digitalRead(TARE_PIN) == 0) {
         blinkLed(3, 1000); // Blink the LED 3 times with 200ms delay to indicate tare and calibration
+        while (digitalRead(TARE_PIN) == 0) {
+            Serial.println("TARE pin still grounded, testing scale readings...");
+            testScale();
+        }
         long reading = scale.get_units(10);
         Serial.print("Reading before tare: ");
         Serial.println(reading);
@@ -171,7 +192,7 @@ void disableContainerLight() {
 
 float readScale() {
     long raw = scale.read();   // lage-level check
-    float weight = scale.get_units(10);
+    float weight = scale.get_units(20);
 
     Serial.print("Raw: ");
     Serial.print(raw);
@@ -237,39 +258,6 @@ void setup()
     
 }
 
-void testScale() {
-    for (int i = 0; i < 100; i++) {
-        scale.power_down();
-        delay(100);
-        // scale.power_up();
-        // delay(400); // settling time
-        scale.begin(HX711_DT, HX711_SCK);
-        scale.set_scale(calibration_factor);
-        delay(400);
-
-        while (!scale.is_ready()) {
-            Serial.println("HX711 not ready");
-            delay(3000);
-        }
-
-        // Discard first few readings (settling)
-        scale.get_units(3);
-        
-        //long raw = scale.read();
-        //long avg = scale.read_average(10);
-        float weight = scale.get_units(5);
-
-        // Serial.print("Raw: ");
-        // Serial.print(raw);
-        // Serial.print("  Avg: ");
-        // Serial.print(avg);
-        Serial.print("  Weight: ");
-        Serial.print(weight, 2);
-        Serial.println(" g");
-        delay(3000);
-    }
-}
-
 void loop()
 {
 
@@ -287,7 +275,7 @@ void loop()
     }
 
     // Once the lid is closed, switch the light in the container ON 
-    
+    enableContainerLight();
 
     // Once the contact is closed, take a new scale reading
     float finalWeight = readScale();
@@ -296,8 +284,6 @@ void loop()
     sendWeightToCameraESP(finalWeight);
 
     disableContainerLight();
-
-    testScale();
 
     startSleep();
 }
