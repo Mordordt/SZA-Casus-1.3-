@@ -10,8 +10,8 @@
 #include "magnetic_contact.h"
 
 // When using timed sleep, set the sleep time here
-#define uS_TO_S_FACTOR 1000000 /* Conversion factor for micro seconds to seconds */
-#define TIME_TO_SLEEP 30        /* Time ESP32 will go to sleep (in seconds) */
+#define uS_TO_S_FACTOR 1000000    /* Conversion factor for micro seconds to seconds */
+#define TIME_TO_SLEEP 30          /* Time ESP32 will go to sleep (in seconds) */
 RTC_DATA_ATTR int boot_count = 0; // survives deep sleep
 
 // MAC address of the Camera ESP
@@ -37,46 +37,61 @@ void loop();
 
 HX711 scale;
 
-float calibration_factor = -25;//-130; // initiële waarde, na inbouwen definitief calibreren
+float calibration_factor = -25; //-130; // initiële waarde, na inbouwen definitief calibreren
 
 // Image capture timing
 static unsigned long lastCaptureTime = 0;
 static const unsigned long CAPTURE_INTERVAL = 5000; // 1 second in milliseconds
 
-void beginSerialCommunication() {
+void beginSerialCommunication()
+{
     Serial.begin(115200);
     uint32_t start = millis();
     // Wait for serial communication to be established, and avoid hanging when the serial monitor is not open
-    while (!Serial && millis() - start < 200) {
+    while (!Serial && millis() - start < 200)
+    {
         delay(10);
     }
 }
 
-void wakeUpLogic() {
+void wakeUpLogic()
+{
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-    switch (cause) {
-        case ESP_SLEEP_WAKEUP_TIMER:  printf("Timer wakeup\n"); break;
-        case ESP_SLEEP_WAKEUP_EXT0:   printf("EXT0 wakeup\n"); break;
-        case ESP_SLEEP_WAKEUP_EXT1:   printf("EXT1 wakeup\n"); break;
-        case ESP_SLEEP_WAKEUP_UNDEFINED: printf("Not a wakeup reset\n"); break;
-        default: printf("Other cause: %d\n", cause); break;
+    switch (cause)
+    {
+    case ESP_SLEEP_WAKEUP_TIMER:
+        printf("Timer wakeup\n");
+        break;
+    case ESP_SLEEP_WAKEUP_EXT0:
+        printf("EXT0 wakeup\n");
+        break;
+    case ESP_SLEEP_WAKEUP_EXT1:
+        printf("EXT1 wakeup\n");
+        break;
+    case ESP_SLEEP_WAKEUP_UNDEFINED:
+        printf("Not a wakeup reset\n");
+        break;
+    default:
+        printf("Other cause: %d\n", cause);
+        break;
     }
 }
 
-void blinkLed(int times, int delayTime) {
+void blinkLed(int times, int delayTime)
+{
 
     // Disable hold on GPIO 4 to allow it to be used normally after wakeup
     rtc_gpio_hold_dis(SIGNAL_PIN_IO);
     pinMode(SIGNAL_PIN, OUTPUT);
 
     // Flash the LED the specified number of times for the specified duration
-    for (int i = 0; i < times; i++) {
-        
+    for (int i = 0; i < times; i++)
+    {
+
         digitalWrite(SIGNAL_PIN, LOW);
         delay(delayTime);
         digitalWrite(SIGNAL_PIN, HIGH);
         delay(delayTime);
-
     }
 
     // Re-enable hold on GPIO 4 to keep the LED off during deep sleep
@@ -88,22 +103,24 @@ void setupMagneticContactSensor()
 
     Serial.println("Setting up magnetic contact sensor...");
 
-    #if defined(MAGNETIC_CONTACT_PIN)
-        pinMode(MAGNETIC_CONTACT_PIN, INPUT_PULLDOWN);
-    #endif
-
+#if defined(MAGNETIC_CONTACT_PIN)
+    pinMode(MAGNETIC_CONTACT_PIN, INPUT_PULLDOWN);
+#endif
 }
 
-void resetHX711(int sckPin) {
-  pinMode(sckPin, OUTPUT);
-  digitalWrite(sckPin, HIGH);
-  delayMicroseconds(100);   // >60 µs
-  digitalWrite(sckPin, LOW);
-  delay(500);
+void resetHX711(int sckPin)
+{
+    pinMode(sckPin, OUTPUT);
+    digitalWrite(sckPin, HIGH);
+    delayMicroseconds(100); // >60 µs
+    digitalWrite(sckPin, LOW);
+    delay(500);
 }
 
-void testScale() {
-    for (int i = 0; i < 10; i++) {
+void testScale()
+{
+    for (int i = 0; i < 10; i++)
+    {
 
         // while (!scale.is_ready()) {
         //     Serial.println("HX711 not ready");
@@ -113,7 +130,7 @@ void testScale() {
 
         // Discard first few readings (settling)
         scale.read_average(10);
-        
+
         // Take raw reading and weight reading
         long avg = scale.read_average(20);
         float weight = scale.get_units(20);
@@ -127,8 +144,9 @@ void testScale() {
     }
 }
 
-void setupScale() {
-    
+void setupScale()
+{
+
     Serial.println("Setting up scale...");
 
     pinMode(HX711_SCK, OUTPUT);
@@ -139,20 +157,22 @@ void setupScale() {
 
     scale.set_scale(calibration_factor);
 
-    //If tare pin is grounded, perform tare and calibration
+    // If tare pin is grounded, perform tare and calibration
     pinMode(TARE_PIN, INPUT_PULLUP);
 
-    if (digitalRead(TARE_PIN) == 0) {
+    if (digitalRead(TARE_PIN) == 0)
+    {
         Serial.println("TARE pin grounded, performing tare and calibration...");
         blinkLed(3, 1000); // Blink the LED 3 times with 200ms delay to indicate tare and calibration
-        while (digitalRead(TARE_PIN) == 0) {
+        while (digitalRead(TARE_PIN) == 0)
+        {
             Serial.println("TARE pin still grounded, testing scale readings...");
             testScale();
         }
         long reading = scale.get_units(10);
         Serial.print("Reading before tare: ");
         Serial.println(reading);
-        //scale.set_scale();    
+        // scale.set_scale();
         Serial.println("Tare... remove any weights from the scale.");
         delay(5000);
         scale.tare();
@@ -163,11 +183,11 @@ void setupScale() {
         Serial.print("Reading after tare: ");
         Serial.println(reading);
         delay(1000);
-    } 
-    
+    }
 }
 
-void setupCommunicationWithCameraESP() {
+void setupCommunicationWithCameraESP()
+{
     Serial.println("Setting up communication with camera ESP...");
     WiFi.mode(WIFI_STA);
     esp_now_init();
@@ -180,7 +200,8 @@ void setupCommunicationWithCameraESP() {
     esp_now_add_peer(&peer);
 }
 
-void enableCamera() {
+void enableCamera()
+{
 
     // Disable hold on GPIO 2 to allow it to be used normally after wakeup
     rtc_gpio_hold_dis(CAMERA_PWR_PIN_IO);
@@ -189,7 +210,8 @@ void enableCamera() {
     digitalWrite(CAMERA_PWR_PIN, HIGH);
 }
 
-void disableCamera() {
+void disableCamera()
+{
 
     digitalWrite(CAMERA_PWR_PIN, LOW);
 
@@ -197,14 +219,15 @@ void disableCamera() {
     rtc_gpio_hold_en(CAMERA_PWR_PIN_IO);
 }
 
-float readScale() {
+float readScale()
+{
     // Wait until the scale is ready
     // while (!scale.is_ready()) {
     //     Serial.print(millis());
     //     Serial.println("Waiting for scale to be ready...");
     //     blinkLed(1, 100);
     // }
-    long raw = scale.read();   // lage-level check
+    long raw = scale.read(); // lage-level check
     float weight = scale.get_units(20);
 
     Serial.print("Raw: ");
@@ -215,41 +238,44 @@ float readScale() {
     return weight;
 }
 
-void onSent(const uint8_t *mac, esp_now_send_status_t status) {
+void onSent(const uint8_t *mac, esp_now_send_status_t status)
+{
     sendConfirmed = true;
     blinkLed(1, 100); // Blink the LED once for 100ms to indicate send confirmation
 }
 
-void sendWeightToCameraESP(float weight) {
+void sendWeightToCameraESP(float weight)
+{
     // Send the weight reading to the camera ESP
     Serial.print("Sending weight to camera ESP: ");
     Serial.println(weight, 2);
-    
+
     sendConfirmed = false;
-    esp_now_send(cameraMAC, (uint8_t*)&weight, sizeof(float));
+    esp_now_send(cameraMAC, (uint8_t *)&weight, sizeof(float));
 
     // Wait for send confirmation before sleeping
     uint32_t start = millis();
-    while (!sendConfirmed) {
-        if (millis() - start > 4000) break;
+    while (!sendConfirmed)
+    {
+        if (millis() - start > 4000)
+            break;
         delay(10);
     }
 }
 
-void startSleep() {
+void startSleep()
+{
     Serial.print("Go to sleep ");
     blinkLed(2, 500); // Blink the LED 2 times with 500ms delay
 
-    //esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+    // esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
     pinMode(MAGNETIC_CONTACT_PIN, INPUT_PULLDOWN);
     esp_sleep_enable_ext0_wakeup(MAGNETIC_CONTACT_PIN_IO, 0);
 
     vTaskDelay(pdMS_TO_TICKS(1000)); // wait for serial comm to finish
 
     esp_deep_sleep_start();
-    
 }
-
 
 void setup()
 {
@@ -268,18 +294,18 @@ void setup()
     setupMagneticContactSensor();
 
     setupCommunicationWithCameraESP();
-    
 }
 
 void loop()
 {
 
-    //Take scale reading directly after wakeup, to check if the scale is still responsive after deep sleep
+    // Take scale reading directly after wakeup, to check if the scale is still responsive after deep sleep
     float initialWeight = readScale();
 
     // Read magnetic contact sensor
     // Wait for the magnetic contact to be closed, indicating the lid closed again
-    while (!readMagneticContact()) {
+    while (!readMagneticContact())
+    {
         Serial.println("Waiting for magnetic contact to close...");
         Serial.print("Magnetic Contact: ");
         Serial.println(readMagneticContact() ? "CLOSED" : "OPEN");
@@ -290,14 +316,14 @@ void loop()
     // Once the contact is closed, take a new scale reading
     float finalWeight = readScale();
 
-    // Once the lid is closed, switch the camera ESP and the light in the container ON 
+    // Once the lid is closed, switch the camera ESP and the light in the container ON
     enableCamera();
 
-    // Send the reading to the camera ESP 
+    // Send the reading to the camera ESP
     sendWeightToCameraESP(finalWeight);
 
-    // Wait for 5 seconds to make sure the camera ESP has done its work
-    delay(5000);
+    // Wait for 30 seconds to make sure the camera ESP has done its work
+    delay(30000);
 
     disableCamera();
 
