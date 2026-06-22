@@ -43,17 +43,42 @@
 
 // #define HX711_DT  12
 // #define HX711_SCK 13
-#define HX711_DT  22
-#define HX711_SCK 23
 
-#define MAGNETIC_CONTACT_PIN 14  // GPIO pin connected to magnetic contact sensor
-#define WAKE_PIN GPIO_NUM_14
-#define LED_PIN 15 //LED for light
+// #define HX711_DT  22
+// #define HX711_SCK 23
 
-#define TARE_PIN 2 // ground to tare the scale
+// #define HX711_DT  25
+// #define HX711_SCK 26
 
+// #define HX711_DT  12
+// #define HX711_SCK 14
 
+#define HX711_DT  18
+#define HX711_SCK 19
 
+#define MAGNETIC_CONTACT_PIN 33   // GPIO pin connected to magnetic contact sensor
+#define MAGNETIC_CONTACT_PIN_IO GPIO_NUM_33
+#define CAMERA_PWR_PIN 15 //GPIO pin to control camera power
+#define CAMERA_PWR_PIN_IO GPIO_NUM_15 // GPIO pin to control camera power
+#define SIGNAL_PIN 2 // GPIO pin to control signal LED
+#define SIGNAL_PIN_IO GPIO_NUM_2 // GPIO pin to control signal LED
+
+#define TARE_PIN 27 // ground to tare the scale
+
+#elif defined(CAMERA_MODEL_SIMCAM_WEIGHT)
+
+#define HX711_DT  46
+#define HX711_SCK 45
+
+#define MAGNETIC_CONTACT_PIN 21   // GPIO pin connected to magnetic contact sensor
+#define MAGNETIC_CONTACT_PIN_IO GPIO_NUM_21
+#define CAMERA_PWR_PIN 15 //GPIO pin to control camera power
+#define CAMERA_PWR_PIN_IO GPIO_NUM_15 // GPIO pin to control camera power
+#define SIGNAL_PIN 2 // GPIO pin to control signal LED
+#define SIGNAL_PIN_IO GPIO_NUM_2 // GPIO pin to control signal LED
+
+#define TARE_PIN 27 // ground to tare the scale
+    
 #else
 
 #error "Please select the model of the board you want to use in main.cpp"

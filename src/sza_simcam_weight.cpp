@@ -5,7 +5,7 @@
 #include <esp_now.h>
 #include <WiFi.h>
 
-#define CAMERA_MODEL_ESPCAM
+#define CAMERA_MODEL_SIMCAM_WEIGHT
 #include "select_pins.h"
 #include "magnetic_contact.h"
 
@@ -66,21 +66,21 @@ void wakeUpLogic() {
 void blinkLed(int times, int delayTime) {
 
     // Disable hold on GPIO 4 to allow it to be used normally after wakeup
-    rtc_gpio_hold_dis(SIGNAL_PIN_IO);
-    pinMode(SIGNAL_PIN, OUTPUT);
+    rtc_gpio_hold_dis(GPIO_NUM_2);
+    pinMode(2, OUTPUT);
 
     // Flash the LED the specified number of times for the specified duration
     for (int i = 0; i < times; i++) {
         
-        digitalWrite(SIGNAL_PIN, LOW);
+        digitalWrite(2, LOW);
         delay(delayTime);
-        digitalWrite(SIGNAL_PIN, HIGH);
+        digitalWrite(2, HIGH);
         delay(delayTime);
 
     }
 
     // Re-enable hold on GPIO 4 to keep the LED off during deep sleep
-    rtc_gpio_hold_en(SIGNAL_PIN_IO);
+    rtc_gpio_hold_en(GPIO_NUM_2);
 }
 
 void setupMagneticContactSensor()

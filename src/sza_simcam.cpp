@@ -112,6 +112,7 @@ void onDataReceived(const uint8_t *mac, const uint8_t *data, int len) {
     weightReceived = true;
     Serial.print("Received weight: ");
     Serial.println(receivedWeight, 2);
+    
 }
 
 bool setupCommunicationWithWeightEsp() {
@@ -154,7 +155,7 @@ bool setupCamera()
     // init with high specs to pre-allocate larger buffers
     config.frame_size = FRAMESIZE_UXGA;
     config.jpeg_quality = 8;
-    config.fb_count = 2;
+    config.fb_count = 1;
     // if (psramFound()) {
     //     config.frame_size = FRAMESIZE_UXGA;
     //     config.jpeg_quality = 8;
@@ -181,7 +182,7 @@ bool setupCamera()
         s->set_saturation(s, -2); // lower the saturation
     }
     // drop down frame size for higher initial frame rate
-    s->set_framesize(s, FRAMESIZE_QVGA);
+    s->set_framesize(s, FRAMESIZE_UXGA);
 
     return true;
 }
@@ -417,20 +418,20 @@ void setup()
 void loop()
 {
 
-    // Read magnetic contact sensor
-    // Wait for the magnetic contact to be closed, indicating the lid closed again
-    while (!readMagneticContact()) {
-        Serial.println("Waiting for magnetic contact to close...");
-        Serial.print("Magnetic Contact: ");
-        Serial.println(readMagneticContact() ? "CLOSED" : "OPEN");
+    // // Read magnetic contact sensor
+    // // Wait for the magnetic contact to be closed, indicating the lid closed again
+    // while (!readMagneticContact()) {
+    //     Serial.println("Waiting for magnetic contact to close...");
+    //     Serial.print("Magnetic Contact: ");
+    //     Serial.println(readMagneticContact() ? "CLOSED" : "OPEN");
 
-        delay(2000);
-    }
+    //     delay(2000);
+    // }
 
     // Wait for weight packet
     uint32_t start = millis();
     while (!weightReceived) {
-        if (millis() - start > 20000) break;
+        if (millis() - start > 60000) break;
         delay(4000);
         Serial.println("Waiting for weight data... ");
     }
