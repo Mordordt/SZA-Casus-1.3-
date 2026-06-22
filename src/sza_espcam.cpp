@@ -16,6 +16,7 @@ RTC_DATA_ATTR int boot_count = 0; // survives deep sleep
 
 // MAC address of the Camera ESP
 uint8_t cameraMAC[] = {0x34, 0x85, 0x18, 0x8D, 0x5C, 0x60};
+// 34 : 85 : 18 : 8D : 5D : 84
 volatile bool sendConfirmed = false;
 
 /***************************************
@@ -37,7 +38,7 @@ void loop();
 
 HX711 scale;
 
-float calibration_factor = -25; //-130; // initiële waarde, na inbouwen definitief calibreren
+float calibration_factor = -108.5; //-25; //-130; // initiële waarde, na inbouwen definitief calibreren
 
 // Image capture timing
 static unsigned long lastCaptureTime = 0;
@@ -119,7 +120,7 @@ void resetHX711(int sckPin)
 
 void testScale()
 {
-    for (int i = 0; i < 10; i++)
+    for (int i = 0; i < 5; i++)
     {
 
         // while (!scale.is_ready()) {
@@ -172,7 +173,7 @@ void setupScale()
         long reading = scale.get_units(10);
         Serial.print("Reading before tare: ");
         Serial.println(reading);
-        // scale.set_scale();
+        scale.set_scale();
         Serial.println("Tare... remove any weights from the scale.");
         delay(5000);
         scale.tare();
@@ -257,8 +258,11 @@ void sendWeightToCameraESP(float weight)
     uint32_t start = millis();
     while (!sendConfirmed)
     {
-        if (millis() - start > 4000)
+        if (millis() - start > 15000)
+        {
+            Serial.println("Send confirmation timeout");
             break;
+        }
         delay(10);
     }
 }
@@ -322,8 +326,8 @@ void loop()
     // Send the reading to the camera ESP
     sendWeightToCameraESP(finalWeight);
 
-    // Wait for 30 seconds to make sure the camera ESP has done its work
-    delay(30000);
+    // Wait for 90 seconds to make sure the camera ESP has done its work
+    delay(90000);
 
     disableCamera();
 
