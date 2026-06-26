@@ -15,8 +15,8 @@
 RTC_DATA_ATTR int boot_count = 0; // survives deep sleep
 
 // MAC address of the Camera ESP
-uint8_t cameraMAC[] = {0x34, 0x85, 0x18, 0x8D, 0x5C, 0x60};
-// 34 : 85 : 18 : 8D : 5D : 84
+// uint8_t cameraMAC[] = {0x34, 0x85, 0x18, 0x8D, 0x5C, 0x60}; //o.g.
+uint8_t cameraMAC[] = {0x34, 0x85, 0x18, 0x8D, 0x5D, 0x84}; // Daniël
 volatile bool sendConfirmed = false;
 
 /***************************************
@@ -76,6 +76,15 @@ void wakeUpLogic()
         printf("Other cause: %d\n", cause);
         break;
     }
+}
+
+void wakeSimcam()
+{
+    Serial.println("Waking SIMCAM...");
+
+    digitalWrite(SIGNAL_PIN, LOW);  // trigger wake
+    delay(300);                     // keep LOW long enough
+    digitalWrite(SIGNAL_PIN, HIGH); // release
 }
 
 void blinkLed(int times, int delayTime)
@@ -190,9 +199,39 @@ void setupScale()
 void setupCommunicationWithCameraESP()
 {
     Serial.println("Setting up communication with camera ESP...");
+
     WiFi.mode(WIFI_STA);
-    esp_now_init();
+    WiFi.disconnect(); // ✅ add this
+    // WiFi.setChannel(1); // ✅ add this (same on both boards)
+
+    if (esp_now_init() != ESP_OK)
+    {
+        Serial.println("ESP-NOW init failed");
+        return;
+    }
+
     esp_now_register_send_cb(onSent);
+
+    // ✅ ADD THIS BLOCK (peer setup)
+    esp_now_peer_info_t peerInfo = {};
+    memcpy(peerInfo.peer_addr, cameraMAC, 6);
+    peerInfo.channel = 1;
+    peerInfo.encrypt = false;
+
+    if (esp_now_add_peer(&peerInfo) != ESP_OK)
+    {
+        Serial.println("Failed to add peer");
+    }
+    else
+    {
+        Serial.println("Peer added successfully");
+    }
+    // void setupCommunicationWithCameraESP()
+    // {
+    //     Serial.println("Setting up communication with camera ESP...");
+    //     WiFi.mode(WIFI_STA);
+    //     esp_now_init();
+    //     esp_now_register_send_cb(onSent);
 
     esp_now_peer_info_t peer = {};
     memcpy(peer.peer_addr, cameraMAC, 6);
@@ -244,12 +283,24 @@ void onSent(const uint8_t *mac, esp_now_send_status_t status)
     sendConfirmed = true;
     blinkLed(1, 100); // Blink the LED once for 100ms to indicate send confirmation
 }
-
 void sendWeightToCameraESP(float weight)
 {
-    // Send the weight reading to the camera ESP
-    Serial.print("Sending weight to camera ESP: ");
-    Serial.println(weight, 2);
+    esp_err_t result = esp_now_send(cameraMAC, (uint8_t *)&weight, sizeof(weight));
+
+    if (result == ESP_OK)
+    {
+        Serial.println("Send success");
+    }
+    else
+    {
+        Serial.println("Send failed");
+    }
+
+    // void sendWeightToCameraESP(float weight)
+    // {
+    //     // Send the weight reading to the camera ESP
+    //     Serial.print("Sending weight to camera ESP: ");
+    //     Serial.println(weight, 2);
 
     sendConfirmed = false;
     esp_now_send(cameraMAC, (uint8_t *)&weight, sizeof(float));
@@ -288,6 +339,8 @@ void setup()
     pinMode(PWR_ON_PIN, OUTPUT);
     digitalWrite(PWR_ON_PIN, 1);
 #endif
+    pinMode(SIGNAL_PIN, OUTPUT);
+    digitalWrite(SIGNAL_PIN, HIGH); // default HIGH
 
     beginSerialCommunication();
 
@@ -323,11 +376,14 @@ void loop()
     // Once the lid is closed, switch the camera ESP and the light in the container ON
     enableCamera();
 
-    // Send the reading to the camera ESP
-    sendWeightToCameraESP(finalWeight);
+    wakeSimcam(); // ✅ wake first
+    delay(1500);  // give time to boot
 
-    // Wait for 90 seconds to make sure the camera ESP has done its work
-    delay(90000);
+    // Send the reading to the camera ESP
+    // sendWeightToCameraESP(finalWeight);
+    sendWeightToCameraESP(123.45); // Test value for debugging
+    // Wait for 5 seconds to make sure the camera ESP has done its work
+    delay(5000);
 
     disableCamera();
 
