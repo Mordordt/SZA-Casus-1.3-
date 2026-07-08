@@ -28,6 +28,8 @@ RTC_DATA_ATTR int boot_count = 0; // survives deep sleep
 volatile bool weightReceived = false;
 float receivedWeight = 0;
 
+const float weightChangeThreshold = 25.0; // Minimum weight change to trigger image capture
+
 /***************************************
  *  WiFi
  **************************************/
@@ -105,7 +107,7 @@ bool setupSDCard()
     SPI.begin(SD_SCLK, SD_MISO, SD_MOSI);
 
 #if defined(SD_CS)
-    if (!SD.begin(SD_CS))
+    if (!SD.begin(SD_CS, SPI))
     {
         Serial.println("SDCard begin failed");
         return false;
@@ -295,6 +297,8 @@ String getTime()
     // Synchronize time with NTP server
     Serial.println("Syncing time with NTP...");
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    setenv("TZ", "CET-1CEST,M3.5.0/2,M10.5.0/3", 1);
+    tzset();
     time_t now = time(nullptr);
     int attempts = 0;
     while (now < 24 * 3600 && attempts < 20)
@@ -368,7 +372,7 @@ void processWeight(float weight, const String &timestamp)
 
     float lastWeight = getLastWeight();
 
-    if (lastWeight >= 0 && weight < lastWeight)
+    if (lastWeight >= 0 && (lastWeight - weight) > weightChangeThreshold)
     {
         Serial.println("Container change detected at " + timestamp);
         registerContainerChange(lastWeight, weight, timestamp);
@@ -506,6 +510,8 @@ void loop()
     checkWifiSignalStrength();
 
     String timestamp = getTime();
+
+    processWeight(receivedWeight, timestamp);
 
     captureAndSaveImage(timestamp);
 

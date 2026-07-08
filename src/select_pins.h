@@ -57,9 +57,9 @@
 
 #define MAGNETIC_CONTACT_PIN 33 // GPIO pin connected to magnetic contact sensor
 #define MAGNETIC_CONTACT_PIN_IO GPIO_NUM_33
-#define CAMERA_PWR_PIN 15             // GPIO pin to control camera power
+#define CAMERA_PWR_PIN 15             // GPIO pin to control camera power, controls mosfet
 #define CAMERA_PWR_PIN_IO GPIO_NUM_15 // GPIO pin to control camera power
-#define SIGNAL_PIN 2                  // GPIO pin to control signal LED
+#define SIGNAL_PIN 2                  // GPIO pin to control signal LED, controls wake up camera
 #define SIGNAL_PIN_IO GPIO_NUM_2      // GPIO pin to control signal LED
 
 #define TARE_PIN 27 // ground to tare the scale

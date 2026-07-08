@@ -15,8 +15,8 @@
 RTC_DATA_ATTR int boot_count = 0; // survives deep sleep
 
 // MAC address of the Camera ESP
-// uint8_t cameraMAC[] = {0x34, 0x85, 0x18, 0x8D, 0x5C, 0x60}; //o.g.
-uint8_t cameraMAC[] = {0x34, 0x85, 0x18, 0x8D, 0x5D, 0x84}; // Daniël
+uint8_t cameraMAC[] = {0x34, 0x85, 0x18, 0x8D, 0x5C, 0x60}; // o.g.
+// uint8_t cameraMAC[] = {0x34, 0x85, 0x18, 0x8D, 0x5D, 0x84}; // Daniël
 volatile bool sendConfirmed = false;
 
 /***************************************
@@ -380,10 +380,10 @@ void loop()
     delay(1500);  // give time to boot
 
     // Send the reading to the camera ESP
-    // sendWeightToCameraESP(finalWeight);
-    sendWeightToCameraESP(123.45); // Test value for debugging
-    // Wait for 5 seconds to make sure the camera ESP has done its work
-    delay(5000);
+    sendWeightToCameraESP(finalWeight);
+    // sendWeightToCameraESP(123.45); // Test value for debugging
+    // Wait for 10 seconds to make sure the camera ESP has done its work
+    delay(10000);
 
     disableCamera();
 
