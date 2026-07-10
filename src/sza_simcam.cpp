@@ -33,8 +33,6 @@ const float weightChangeThreshold = 25.0; // Minimum weight change to trigger im
 #define WIFI_SSID "sza"
 #define WIFI_PASSWD "sza_esp_2026" 
 
-#define WIFI_SSID "D_hutspot_werk"
-#define WIFI_PASSWD "gmiv6175"
 /***************************************
  *  Forward declarations
  **************************************/
@@ -473,28 +471,23 @@ void loop()
 {
 
     // Wait for weight packet
-    // uint32_t start = millis();
-    // while (!weightReceived)
-    // {
-    //     if (millis() - start > 60000)
-    //         break;
-    //     delay(4000);
-    //     Serial.println("Waiting for weight data... ");
-    // }
+    uint32_t start = millis();
+    while (!weightReceived) {
+        if (millis() - start > 60000) break;
+        delay(4000);
+        Serial.println("Waiting for weight data... ");
+    }
 
-    // // Change to WiFi for fetching current time only after receiving the weight, to save time in setup
-    // setupNetwork();
-    // checkWifiSignalStrength();
-    // String timestamp = getTime();
+    //Change to WiFi for fetching current time only after receiving the weight, to save time in setup
+    setupNetwork();
+    checkWifiSignalStrength();
+    String timestamp = getTime();
 
-    // if (weightReceived)
-    // {
-    //     weightReceived = false; // ✅ reset flag
+    if (weightReceived) {
+        processWeight(receivedWeight, timestamp);
+    }
 
-    //     String timestamp = getTime();
+    captureAndSaveImage(timestamp);
 
-    //     captureAndSaveImage(timestamp); // ✅ only once
-    // }
-
-    // startSleep();
+    startSleep();
 }
