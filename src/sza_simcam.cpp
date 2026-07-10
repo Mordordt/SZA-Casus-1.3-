@@ -12,10 +12,6 @@
 #include "select_pins.h"
 #include "magnetic_contact.h"
 
-
-/***************************************
- *  Function
- **************************************/
 // #define SOFTAP_MODE       //The comment will be connected to the specified ssid
 
 // When there is BME280, set the reading time here
@@ -32,10 +28,8 @@ float receivedWeight = 0;
 /***************************************
  *  WiFi
  **************************************/
-// #define WIFI_SSID "sza"
-// #define WIFI_PASSWD "sza_esp_2026" 
-#define WIFI_SSID "moto g 5G plus 2457"
-#define WIFI_PASSWD "sjefenben" 
+#define WIFI_SSID "sza"
+#define WIFI_PASSWD "sza_esp_2026" 
 
 /***************************************
  *  Forward declarations
@@ -62,8 +56,6 @@ String ipAddress = "";
 // Image capture timing
 static unsigned long lastCaptureTime = 0;
 static const unsigned long CAPTURE_INTERVAL = 5000; // 1 second in milliseconds
-
-extern void startCameraServer();
 
 void performWakeUpLogic() {
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
@@ -156,16 +148,6 @@ bool setupCamera()
     config.frame_size = FRAMESIZE_UXGA;
     config.jpeg_quality = 8;
     config.fb_count = 1;
-    // if (psramFound()) {
-    //     config.frame_size = FRAMESIZE_UXGA;
-    //     config.jpeg_quality = 8;
-    //     config.fb_count = 2;
-    // } else {
-    //     config.frame_size = FRAMESIZE_SVGA;
-    //     config.jpeg_quality = 12;
-    //     config.fb_count = 1;
-    //     config.fb_location = CAMERA_FB_IN_DRAM;
-    // }
 
     // camera init
     esp_err_t err = esp_camera_init(&config);
@@ -181,7 +163,6 @@ bool setupCamera()
         s->set_brightness(s, 1);  // up the blightness just a bit
         s->set_saturation(s, -2); // lower the saturation
     }
-    // drop down frame size for higher initial frame rate
     s->set_framesize(s, FRAMESIZE_UXGA);
 
     return true;
@@ -417,16 +398,6 @@ void setup()
 
 void loop()
 {
-
-    // // Read magnetic contact sensor
-    // // Wait for the magnetic contact to be closed, indicating the lid closed again
-    // while (!readMagneticContact()) {
-    //     Serial.println("Waiting for magnetic contact to close...");
-    //     Serial.print("Magnetic Contact: ");
-    //     Serial.println(readMagneticContact() ? "CLOSED" : "OPEN");
-
-    //     delay(2000);
-    // }
 
     // Wait for weight packet
     uint32_t start = millis();
