@@ -47,13 +47,16 @@ void checkWifiSignalStrength();
 void processWeight(float weight, const String &timestamp);
 float getLastWeight();
 void updateLastWeight(float weight, const String &timestamp);
-bool captureAndSaveImage(const String &timestamp);
+bool captureAndSaveImage();
+bool renameImageWithTimestamp(const String &timestamp);
+uint32_t getNextImageCounter();
 void hx711_hard_reset(int sckPin);
 void setup();
 void loop();
 
 String macAddress = "";
 String ipAddress = "";
+String lastCapturedImageName = "";
 
 // Image capture timing
 static unsigned long lastCaptureTime = 0;
@@ -229,13 +232,46 @@ void setupNetwork()
 #endif
 }
 
-bool captureAndSaveImage(const String &timestamp)
+uint32_t getNextImageCounter()
 {
-    // Format filename with provided timestamp
-    char filename[64];
-    snprintf(filename, sizeof(filename), "/capture_%s.jpg", timestamp.c_str());
+    uint32_t counter = 0;
 
-    // Capture frame from camera
+    File counterFile = SD.open("/image_counter.txt", FILE_READ);
+    if (counterFile)
+    {
+        counter = counterFile.readStringUntil('\n').toInt();
+        counterFile.close();
+    }
+    else
+    {
+        counterFile = SD.open("/image_counter.txt", FILE_WRITE);
+        if (counterFile)
+        {
+            counterFile.println("0");
+            counterFile.close();
+        }
+    }
+
+    counter++;
+
+    File writeFile = SD.open("/image_counter.txt", FILE_WRITE);
+    if (writeFile)
+    {
+        writeFile.println(counter);
+        writeFile.close();
+    }
+
+    return counter;
+}
+
+bool captureAndSaveImage()
+{
+    uint32_t counter = getNextImageCounter();
+
+    char filename[64];
+    snprintf(filename, sizeof(filename), "/capture_%05lu.jpg", counter);
+    lastCapturedImageName = String(filename);
+
     camera_fb_t *fb = esp_camera_fb_get();
     if (!fb)
     {
@@ -243,7 +279,6 @@ bool captureAndSaveImage(const String &timestamp)
         return false;
     }
 
-    // Open file for writing
     File file = SD.open(filename, FILE_WRITE);
     if (!file)
     {
@@ -253,7 +288,6 @@ bool captureAndSaveImage(const String &timestamp)
         return false;
     }
 
-    // Write image data to file
     if (file.write(fb->buf, fb->len) != fb->len)
     {
         Serial.println("Failed to write image to SD card");
@@ -265,9 +299,39 @@ bool captureAndSaveImage(const String &timestamp)
     file.close();
     esp_camera_fb_return(fb);
 
-    Serial.print("Image saved: ");
+    Serial.print("Image saved with counter name: ");
     Serial.println(filename);
 
+    return true;
+}
+
+bool renameImageWithTimestamp(const String &timestamp)
+{
+    if (timestamp.length() == 0)
+    {
+        return false;
+    }
+
+    char oldFilename[64];
+    char newFilename[64];
+
+    if (lastCapturedImageName.length() == 0)
+    {
+        return false;
+    }
+
+    snprintf(oldFilename, sizeof(oldFilename), "%s", lastCapturedImageName.c_str());
+    snprintf(newFilename, sizeof(newFilename), "/capture_%s.jpg", timestamp.c_str());
+
+    if (!SD.rename(oldFilename, newFilename))
+    {
+        Serial.print("Failed to rename image to: ");
+        Serial.println(newFilename);
+        return false;
+    }
+
+    Serial.print("Image renamed to: ");
+    Serial.println(newFilename);
     return true;
 }
 
@@ -469,6 +533,12 @@ void setup()
 
 void loop()
 {
+    // Capture and save image in temporary file first
+    if (!captureAndSaveImage())
+    {
+        Serial.println("Image capture failed");
+    }
+
 
     // Wait for weight packet
     uint32_t start = millis();
@@ -478,7 +548,7 @@ void loop()
         Serial.println("Waiting for weight data... ");
     }
 
-    //Change to WiFi for fetching current time only after receiving the weight, to save time in setup
+    // Change to WiFi for fetching current time only after receiving the weight, to save time in setup
     setupNetwork();
     checkWifiSignalStrength();
     String timestamp = getTime();
@@ -487,7 +557,7 @@ void loop()
         processWeight(receivedWeight, timestamp);
     }
 
-    captureAndSaveImage(timestamp);
+    renameImageWithTimestamp(timestamp);
 
     startSleep();
 }
